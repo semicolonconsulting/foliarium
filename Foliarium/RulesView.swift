@@ -257,7 +257,7 @@ private struct WhereCell: View {
             Text(rule.folderName)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if !rule.includeSubfolders {
+            if rule.action.handlesFiles && !rule.includeSubfolders {
                 Text("top level")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -270,6 +270,7 @@ private struct WhereCell: View {
         if rule.folderPath.isEmpty { return "No folder chosen" }
         let path = Paths.display(rule.folderPath)
         if missing { return "\(path) can't be found" }
+        if !rule.action.handlesFiles { return path }
         return rule.includeSubfolders ? "\(path) and the folders inside it" : "\(path), without the folders inside it"
     }
 }
@@ -315,11 +316,14 @@ struct RuleEditor: View {
                                                   startingAt: draft.folderPath, toLookIn: true)
                         } set: { draft.folderPath = $0 }
                     }
-                    Toggle("Also look in subfolders", isOn: $draft.includeSubfolders)
+                    if draft.action.handlesFiles {
+                        Toggle("Also look in subfolders", isOn: $draft.includeSubfolders)
+                    }
                 } header: {
                     Text("Where")
                 } footer: {
-                    Text("Hidden files and the contents of apps are left alone.")
+                    Text(draft.action.handlesFiles ? "Hidden files and the contents of apps are left alone."
+                                                   : "The new folder is made inside this folder.")
                         .foregroundStyle(.secondary)
                 }
 
@@ -378,6 +382,20 @@ struct RuleEditor: View {
                         Divider()
                         ForEach([Rule.Action.convertAliases, .convertWeblocs, .convertTextClippings, .extractZip]) { action in
                             Text(action.title).tag(action)
+                        }
+                        Divider()
+                        Text(Rule.Action.createFolder.title).tag(Rule.Action.createFolder)
+                    }
+                    if draft.action == .createFolder {
+                        TextField("Folder name", text: $draft.newFolderName, prompt: Text("Invoices"))
+                        if draft.problem == nil {
+                            LabeledContent("Today") {
+                                Text(Paths.display((draft.folderPath as NSString)
+                                    .appendingPathComponent(draft.folderToCreate(date: Date()))))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     if draft.action.usesConditions {
@@ -446,6 +464,16 @@ struct RuleEditor: View {
     }
 
     private var whenFooter: String {
+        if draft.action == .createFolder {
+            switch draft.trigger {
+            case .changes:
+                return "The folder is made when you save the rule and when Foliarium starts, and made again a few seconds after anything in the folder changes, if it's missing then."
+            case .schedule:
+                return "The folder is made at these times, if it's missing then. If the Mac is asleep or Foliarium isn't running, the rule runs once as soon as it can."
+            case .manual:
+                return "The folder is made when you click Run Now, if it's missing. Run Now is in the General tab and the menu bar."
+            }
+        }
         switch draft.trigger {
         case .changes:
             return "Files are handled a few seconds after they arrive, even if Foliarium wasn't running then. Files that are already there wait for Run Now."
@@ -495,6 +523,8 @@ struct RuleEditor: View {
             return "Replaces each .textClipping (text dragged out of an app into Finder) with a .txt file of the same name holding its text. The clipping goes to the Trash."
         case .extractZip:
             return "Extracts each .zip next to itself: a single item comes out as it is, several go into a folder named after the archive. The .zip goes to the Trash."
+        case .createFolder:
+            return "Makes a folder with this name in the rule's folder, if it isn't there yet. Nothing happens to files. YYYY, MM and DD are the date, so Scans YYYY-MM on a monthly schedule makes a new folder each month. Use / for a folder inside a folder, such as Projects/YYYY."
         }
     }
 

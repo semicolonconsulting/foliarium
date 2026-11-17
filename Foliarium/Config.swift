@@ -74,6 +74,7 @@ struct Rule: Codable, Identifiable, Hashable {
     enum Action: String, Codable, CaseIterable, Identifiable {
         case move, delete, changeExtension
         case convertAliases, convertWeblocs, convertTextClippings, extractZip
+        case createFolder
 
         var id: String { rawValue }
 
@@ -86,6 +87,7 @@ struct Rule: Codable, Identifiable, Hashable {
             case .convertWeblocs: return "Convert .webloc files to .url"
             case .convertTextClippings: return "Convert .textClipping files to .txt"
             case .extractZip: return "Extract .zip archives"
+            case .createFolder: return "Create a folder"
             }
         }
 
@@ -98,12 +100,16 @@ struct Rule: Codable, Identifiable, Hashable {
             case .convertWeblocs: return "link"
             case .convertTextClippings: return "doc.plaintext"
             case .extractZip: return "doc.zipper"
+            case .createFolder: return "folder.badge.plus"
             }
         }
 
         /// Actions that pick files with Kind, Extensions and File name. The conversions each handle one
         /// kind of file, so they don't.
         var usesConditions: Bool { self == .move || self == .delete || self == .changeExtension }
+
+        /// Actions that work on the files in the rule's folder. "Create a folder" only makes a folder there.
+        var handlesFiles: Bool { self != .createFolder }
     }
 
     var id = UUID()
@@ -132,6 +138,9 @@ struct Rule: Codable, Identifiable, Hashable {
     /// For moves: the new name, or empty to keep it. `*` is the original name without its extension, and
     /// YYYY, MM and DD are the date of the move. The extension is always kept.
     var renamePattern = ""
+    /// For "Create a folder": the name of the folder to make inside the rule's folder, such as "Invoices".
+    /// YYYY, MM and DD are the date it's made, and / makes folders inside folders ("Projects/YYYY").
+    var newFolderName = ""
 
     init() {}
 
@@ -151,6 +160,7 @@ struct Rule: Codable, Identifiable, Hashable {
         destinationPath = try c.decodeIfPresent(String.self, forKey: .destinationPath) ?? d.destinationPath
         renamePattern = try c.decodeIfPresent(String.self, forKey: .renamePattern) ?? d.renamePattern
         newExtension = try c.decodeIfPresent(String.self, forKey: .newExtension) ?? d.newExtension
+        newFolderName = try c.decodeIfPresent(String.self, forKey: .newFolderName) ?? d.newFolderName
     }
 
     var extensionList: [String] {
@@ -176,6 +186,10 @@ struct Rule: Codable, Identifiable, Hashable {
         case .changeExtension:
             if cleanNewExtension.isEmpty { return "Type the new extension." }
             if cleanNewExtension.contains(where: { "/:".contains($0) }) { return "The extension can't contain / or :." }
+        case .createFolder:
+            if folderNameParts.isEmpty { return "Type the new folder's name." }
+            if newFolderName.contains(":") { return "The folder name can't contain :." }
+            if folderNameParts.contains(where: { $0.hasPrefix(".") }) { return "The folder name can't start with a dot." }
         default:
             break
         }
@@ -185,6 +199,26 @@ struct Rule: Codable, Identifiable, Hashable {
     /// The new extension without spaces or leading dots: " .md" → "md".
     var cleanNewExtension: String {
         String(newExtension.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "." }))
+    }
+
+    /// The new folder's name split at /, without empty parts: " Projects / YYYY " → ["Projects", "YYYY"].
+    private var folderNameParts: [String] {
+        newFolderName.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// The folder "Create a folder" makes, relative to the rule's folder, with the date filled in:
+    /// "Scans YYYY-MM" → "Scans 2026-11".
+    func folderToCreate(date: Date) -> String {
+        folderNameParts.map { Self.fillDate($0, date: date) }.joined(separator: "/")
+    }
+
+    /// Replaces YYYY, MM and DD with the date.
+    private static func fillDate(_ text: String, date: Date) -> String {
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return text
+            .replacingOccurrences(of: "YYYY", with: String(format: "%04d", parts.year ?? 0))
+            .replacingOccurrences(of: "MM", with: String(format: "%02d", parts.month ?? 0))
+            .replacingOccurrences(of: "DD", with: String(format: "%02d", parts.day ?? 0))
     }
 
     private var trimmedRename: String { renamePattern.trimmingCharacters(in: .whitespaces) }
@@ -197,12 +231,7 @@ struct Rule: Codable, Identifiable, Hashable {
         let ext = (name as NSString).pathExtension
         let base = ext.isEmpty ? name : (name as NSString).deletingPathExtension
         if fnmatch(Self.glob(fromRename: pattern), base.precomposedStringWithCanonicalMapping, 0) == 0 { return name }
-        let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        let filled = pattern
-            .replacingOccurrences(of: "YYYY", with: String(format: "%04d", parts.year ?? 0))
-            .replacingOccurrences(of: "MM", with: String(format: "%02d", parts.month ?? 0))
-            .replacingOccurrences(of: "DD", with: String(format: "%02d", parts.day ?? 0))
-            .replacingOccurrences(of: "*", with: base)
+        let filled = Self.fillDate(pattern, date: date).replacingOccurrences(of: "*", with: base)
         let newBase = filled.trimmingCharacters(in: .whitespaces)
         guard !newBase.isEmpty else { return name }
         return ext.isEmpty ? newBase : newBase + "." + ext
@@ -294,6 +323,9 @@ struct Rule: Codable, Identifiable, Hashable {
             return "Delete \(conditionSummary) (to the Trash)"
         case .changeExtension:
             return "Change \(conditionSummary) to .\(cleanNewExtension.isEmpty ? "?" : cleanNewExtension)"
+        case .createFolder:
+            let name = folderNameParts.joined(separator: "/")
+            return "Create folder “\(name.isEmpty ? "?" : name)”"
         default:
             return action.title
         }

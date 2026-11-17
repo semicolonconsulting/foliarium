@@ -9,6 +9,7 @@ Foliarium is a menu bar app that tidies folders with rules. Each rule says **whe
 - **Convert `.webloc` bookmarks to Windows `.url` files**, like the [webloc2url](https://github.com/semicolonconsulting/webloc2url) Quick Action.
 - **Convert `.textClipping` files to `.txt`**.
 - **Extract `.zip` archives**.
+- **Create a folder** with a name you choose inside the rule's folder, for example "Invoices" or "Scans YYYY-MM".
 
 Every conversion replaces the file: the new file is written first, then the original goes to the Trash. Nothing opens another app.
 
@@ -72,6 +73,7 @@ So a `.textClipping` can become `.txt`, then `.md`, and be filed by a move rule,
 - **Change the extension**: renames `notes.txt` to `notes.md` in the same folder. Only the name changes.
 - **Move**: if the destination already has a file with that name, the moved file becomes `Name (1).ext`. Nothing is overwritten. If the destination folder is missing, the move fails and is reported.
 - **Delete**: moves matching files to the Trash.
+- **Create a folder**: makes a folder with the rule's name inside the rule's folder, if it isn't there yet. It doesn't touch any files. `YYYY`, `MM` and `DD` in the name are the date it's made, and `/` makes a folder inside a folder (`Projects/YYYY`). With "When files are added or changed", the folder is made when you save the rule and when Foliarium starts, and made again if it goes missing and something in the folder changes. On a schedule it's made at those times, and with "Only when I click Run Now" when you click Run Now. If a file already has that name, nothing is made and it's reported.
 
 Originals go to the Trash (Put Back works), never straight to deletion. In-progress downloads (`.download`, `.crdownload`, `.part`) are skipped. When watching, a file that changed in the last 3 seconds waits until it's been left alone, so files still being copied aren't moved halfway through.
 
