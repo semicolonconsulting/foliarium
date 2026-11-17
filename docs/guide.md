@@ -36,7 +36,7 @@ To build it yourself instead, see [Build from source](building.md).
 
 Foliarium lives in the menu bar. The first time it opens, the Settings window opens on the Rules tab so you can add a rule.
 
-**Rules** lists the rules in three columns: Where, When and What. Click **+** to add a rule, and **Edit…** or double-click to change one. Right-click a rule to duplicate it, move it up or down, or delete it. The **Auto** switch on each row turns that rule on or off. A rule that's on runs by itself as its When says; a rule that's off doesn't run at all, not even with Run Now.
+**Rules** lists the rules, one per row. Click **+** to add a rule, and **Edit…** or double-click to change one. Right-click a rule to duplicate it, move it up or down, or delete it. The **Automation** switch on each row turns that rule on or off. A rule that's on runs by itself as its When says; a rule that's off doesn't run at all, not even with Run Now. **Status** shows what each rule is doing: a green dot and **Running** when it's watching its folder or on a schedule, **Manual** when it waits for Run Now, **Off** when it's turned off, and an orange dot when its folder is missing or the rule needs finishing. Hover over the status for details, such as a schedule's next run. Then come **Where**, **When** and **What**.
 
 In the rule editor:
 

@@ -61,15 +61,22 @@ struct RulesView: View {
 
     private var table: some View {
         Table(of: Rule.self, selection: $selection) {
-            TableColumn("Auto") { rule in
+            TableColumn("Automation") { rule in
                 Toggle("Turned on", isOn: enabledBinding(rule.id))
                     .toggleStyle(.switch)
                     .controlSize(.mini)
+                    // Smaller than the smallest control size, so the switch doesn't crowd the row.
+                    .scaleEffect(0.8)
                     .tint(.green)
                     .labelsHidden()
                     .help(rule.enabled ? "On: turn this rule off" : "Off: turn this rule on")
+                    .frame(maxWidth: .infinity)
             }
-            .width(36)
+            .width(70)
+            TableColumn("Status") { rule in
+                StatusCell(rule: rule, nextRun: model.nextRuns[rule.id])
+            }
+            .width(min: 80, ideal: 95, max: 130)
             TableColumn("Where") { rule in
                 WhereCell(rule: rule)
                     .opacity(rule.enabled ? 1 : 0.5)
@@ -190,6 +197,44 @@ struct RulesView: View {
     private func delete(_ id: Rule.ID) {
         model.config.rules.removeAll { $0.id == id }
         if selection == id { selection = nil }
+    }
+}
+
+/// The Status column: a coloured dot and a word for what the rule is doing. Green while it runs by itself,
+/// orange when something needs fixing, grey when it's off or waits for Run Now.
+private struct StatusCell: View {
+    let rule: Rule
+    let nextRun: Date?
+
+    private var state: (text: String, color: Color, help: String) {
+        if !rule.enabled { return ("Off", .secondary, "Turned off: this rule doesn't run, not even with Run Now") }
+        if !rule.folderPath.isEmpty && Paths.canonical(rule.folderPath) == nil {
+            return ("Folder missing", .orange, "The folder “\(rule.folderName)” can't be found")
+        }
+        if let problem = rule.problem { return ("Needs setup", .orange, problem) }
+        switch rule.trigger {
+        case .changes:
+            return ("Running", .green, "Watching for files added or changed")
+        case .schedule:
+            let next = nextRun.map { ". Next run: \(Schedule.whenText($0))" } ?? ""
+            return ("Running", .green, "\(rule.schedule.description)\(next)")
+        case .manual:
+            return ("Manual", .secondary, "Runs only when you click Run Now")
+        }
+    }
+
+    var body: some View {
+        let state = state
+        HStack(spacing: 6) {
+            Circle()
+                .fill(state.color)
+                .frame(width: 8, height: 8)
+            Text(state.text)
+                .lineLimit(1)
+                .foregroundStyle(rule.enabled ? .primary : .secondary)
+        }
+        .help(state.help)
+        .accessibilityElement(children: .combine)
     }
 }
 
