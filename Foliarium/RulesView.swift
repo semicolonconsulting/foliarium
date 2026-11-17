@@ -159,7 +159,8 @@ struct RulesView: View {
     private func add() {
         var rule = Rule()
         if let base = model.config.rules.first(where: { $0.id == selection }) ?? model.config.rules.last {
-            rule.folderPath = base.folderPath
+            // A Trash rule's folder is the Trash, which a new rule shouldn't start in.
+            if base.action != .emptyTrash { rule.folderPath = base.folderPath }
             rule.includeSubfolders = base.includeSubfolders
             rule.trigger = base.trigger
         }

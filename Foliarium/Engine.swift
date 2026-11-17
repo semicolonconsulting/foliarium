@@ -146,7 +146,9 @@ final class Engine {
         var trashRules: [Resolved] = []
         var missing: [String] = []
         for rule in rules where rule.isUsable {
-            guard let folder = Paths.canonical(rule.folderPath) else {
+            // "Delete files in Trash" always works in the Trash, whatever folder the settings file names, so a
+            // hand-edited or stale folder can never make it delete anything outside the Trash.
+            guard let folder = Paths.canonical(rule.action == .emptyTrash ? Paths.trash : rule.folderPath) else {
                 let message = "The folder “\(rule.folderName)” can't be found"
                 if !missing.contains(message) { missing.append(message) }
                 continue
