@@ -3,7 +3,8 @@
 Foliarium is a menu bar app that tidies folders with rules. Each rule says **where** to look (a folder, and optionally every folder inside it), **when** to run (as soon as files are added or changed, on a schedule, or only when you click Run Now), and **what** to do:
 
 - **Move files** that match conditions into a folder, for example "PDFs → Documents/PDFs" or "images named Screenshot* → Pictures/Screenshots".
-- **Delete files** that match conditions (they go to the Trash).
+- **Move to Trash** the files that match conditions.
+- **Delete files in Trash** that match conditions, for good, optionally only once they've been in the Trash for some days.
 - **Change the extension** of files that match conditions, for example `.txt` → `.md`.
 - **Convert Finder aliases to symlinks**, like the [alias2symlink](https://github.com/semicolonconsulting/alias2symlink) Quick Action.
 - **Convert `.webloc` bookmarks to Windows `.url` files**, like the [webloc2url](https://github.com/semicolonconsulting/webloc2url) Quick Action.
@@ -72,7 +73,8 @@ So a `.textClipping` can become `.txt`, then `.md`, and be filed by a move rule,
 - **Extract .zip**: extracts with macOS's `ditto` tool into a hidden folder next to the archive, so a failed extraction leaves nothing behind. A single item then takes its place next to the archive; several go into a folder named after it. The `.zip` goes to the Trash.
 - **Change the extension**: renames `notes.txt` to `notes.md` in the same folder. Only the name changes.
 - **Move**: if the destination already has a file with that name, the moved file becomes `Name (1).ext`. Nothing is overwritten. If the destination folder is missing, the move fails and is reported.
-- **Delete**: moves matching files to the Trash.
+- **Move to Trash**: moves matching files to the Trash.
+- **Delete files in Trash**: looks only at the items in your Trash, and deletes the ones that match for good (they can't be put back). Folders in the Trash count by their own name, and hidden items are left alone. **In the Trash for … days or more** keeps things you binned recently. Foliarium needs Full Disk Access to read the Trash, and says so if it's missing.
 - **Create a folder**: makes a folder with the rule's name inside the rule's folder, if it isn't there yet. It doesn't touch any files. `YYYY`, `MM` and `DD` in the name are the date it's made, and `/` makes a folder inside a folder (`Projects/YYYY`). With "When files are added or changed", the folder is made when you save the rule and when Foliarium starts, and made again if it goes missing and something in the folder changes. On a schedule it's made at those times, and with "Only when I click Run Now" when you click Run Now. If a file already has that name, nothing is made and it's reported.
 
 Originals go to the Trash (Put Back works), never straight to deletion. In-progress downloads (`.download`, `.crdownload`, `.part`) are skipped. When watching, a file that changed in the last 3 seconds waits until it's been left alone, so files still being copied aren't moved halfway through.

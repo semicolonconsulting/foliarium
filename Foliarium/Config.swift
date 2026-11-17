@@ -75,19 +75,21 @@ struct Rule: Codable, Identifiable, Hashable {
         case move, delete, changeExtension
         case convertAliases, convertWeblocs, convertTextClippings, extractZip
         case createFolder
+        case emptyTrash
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
             case .move: return "Move files"
-            case .delete: return "Delete files (to the Trash)"
+            case .delete: return "Move to Trash"
             case .changeExtension: return "Change the extension"
             case .convertAliases: return "Convert aliases to symlinks"
             case .convertWeblocs: return "Convert .webloc files to .url"
             case .convertTextClippings: return "Convert .textClipping files to .txt"
             case .extractZip: return "Extract .zip archives"
             case .createFolder: return "Create a folder"
+            case .emptyTrash: return "Delete files in Trash"
             }
         }
 
@@ -101,15 +103,17 @@ struct Rule: Codable, Identifiable, Hashable {
             case .convertTextClippings: return "doc.plaintext"
             case .extractZip: return "doc.zipper"
             case .createFolder: return "folder.badge.plus"
+            case .emptyTrash: return "trash.slash"
             }
         }
 
         /// Actions that pick files with Kind, Extensions and File name. The conversions each handle one
         /// kind of file, so they don't.
-        var usesConditions: Bool { self == .move || self == .delete || self == .changeExtension }
+        var usesConditions: Bool { self == .move || self == .delete || self == .changeExtension || self == .emptyTrash }
 
         /// Actions that work on the files in the rule's folder. "Create a folder" only makes a folder there.
-        var handlesFiles: Bool { self != .createFolder }
+        /// "Delete files in Trash" goes through the items in the Trash itself, not a folder's files.
+        var handlesFiles: Bool { self != .createFolder && self != .emptyTrash }
     }
 
     var id = UUID()
@@ -141,6 +145,8 @@ struct Rule: Codable, Identifiable, Hashable {
     /// For "Create a folder": the name of the folder to make inside the rule's folder, such as "Invoices".
     /// YYYY, MM and DD are the date it's made, and / makes folders inside folders ("Projects/YYYY").
     var newFolderName = ""
+    /// For "Delete files in Trash": only items that have been in the Trash at least this many days. 0 for any.
+    var minDaysInTrash = 0
 
     init() {}
 
@@ -161,6 +167,7 @@ struct Rule: Codable, Identifiable, Hashable {
         renamePattern = try c.decodeIfPresent(String.self, forKey: .renamePattern) ?? d.renamePattern
         newExtension = try c.decodeIfPresent(String.self, forKey: .newExtension) ?? d.newExtension
         newFolderName = try c.decodeIfPresent(String.self, forKey: .newFolderName) ?? d.newFolderName
+        minDaysInTrash = try c.decodeIfPresent(Int.self, forKey: .minDaysInTrash) ?? d.minDaysInTrash
     }
 
     var extensionList: [String] {
@@ -172,7 +179,9 @@ struct Rule: Codable, Identifiable, Hashable {
 
     private var trimmedPattern: String { namePattern.trimmingCharacters(in: .whitespaces) }
 
-    var hasCondition: Bool { kind != .any || !extensionList.isEmpty || !trimmedPattern.isEmpty }
+    var hasCondition: Bool {
+        kind != .any || !extensionList.isEmpty || !trimmedPattern.isEmpty || (action == .emptyTrash && minDaysInTrash > 0)
+    }
 
     /// Why the rule can't be used yet, or nil when it's complete. A move rule with no conditions would
     /// match every file, so at least one is required ("*" in the name field matches everything on purpose).
@@ -296,7 +305,8 @@ struct Rule: Codable, Identifiable, Hashable {
 
     /// The folder's name, for the Where column.
     var folderName: String {
-        folderPath.isEmpty ? "No folder" : (folderPath as NSString).lastPathComponent
+        if action == .emptyTrash { return "Trash" }
+        return folderPath.isEmpty ? "No folder" : (folderPath as NSString).lastPathComponent
     }
 
     /// Which files a move rule picks, like "Image · .png, .jpg · named Screenshot*".
@@ -320,7 +330,10 @@ struct Rule: Codable, Identifiable, Hashable {
             let rename = trimmedRename.isEmpty ? "" : " as \(trimmedRename)"
             return "Move \(conditionSummary) → \(destination)\(rename)"
         case .delete:
-            return "Delete \(conditionSummary) (to the Trash)"
+            return "Move \(conditionSummary) to the Trash"
+        case .emptyTrash:
+            let age = minDaysInTrash > 0 ? " · \(minDaysInTrash)+ days" : ""
+            return "Delete \(conditionSummary)\(age) from the Trash for good"
         case .changeExtension:
             return "Change \(conditionSummary) to .\(cleanNewExtension.isEmpty ? "?" : cleanNewExtension)"
         case .createFolder:
@@ -556,6 +569,9 @@ enum ConfigStore {
 }
 
 enum Paths {
+    /// The Trash on the startup disk. Reading it needs Full Disk Access.
+    static var trash: String { (NSHomeDirectory() as NSString).appendingPathComponent(".Trash") }
+
     /// The real path, with symlinks resolved (/tmp → /private/tmp), as FSEvents reports it.
     /// Nil when nothing exists there.
     static func canonical(_ path: String) -> String? {

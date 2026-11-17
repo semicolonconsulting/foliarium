@@ -310,11 +310,17 @@ struct RuleEditor: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    LabeledContent("Folder") {
-                        folderButton(draft.folderPath, empty: "No folder chosen") {
-                            AppModel.chooseFolder(message: "Choose the folder this rule looks in.",
-                                                  startingAt: draft.folderPath, toLookIn: true)
-                        } set: { draft.folderPath = $0 }
+                    if draft.action == .emptyTrash {
+                        LabeledContent("Folder") {
+                            Label("Trash", systemImage: "trash")
+                        }
+                    } else {
+                        LabeledContent("Folder") {
+                            folderButton(draft.folderPath, empty: "No folder chosen") {
+                                AppModel.chooseFolder(message: "Choose the folder this rule looks in.",
+                                                      startingAt: draft.folderPath, toLookIn: true)
+                            } set: { draft.folderPath = $0 }
+                        }
                     }
                     if draft.action.handlesFiles {
                         Toggle("Also look in subfolders", isOn: $draft.includeSubfolders)
@@ -322,8 +328,10 @@ struct RuleEditor: View {
                 } header: {
                     Text("Where")
                 } footer: {
-                    Text(draft.action.handlesFiles ? "Hidden files and the contents of apps are left alone."
-                                                   : "The new folder is made inside this folder.")
+                    Text(draft.action == .emptyTrash
+                         ? "Only items already in your Trash are deleted. Foliarium needs Full Disk Access to read the Trash: turn it on in System Settings → Privacy & Security → Full Disk Access."
+                         : draft.action.handlesFiles ? "Hidden files and the contents of apps are left alone."
+                                                     : "The new folder is made inside this folder.")
                         .foregroundStyle(.secondary)
                 }
 
@@ -376,7 +384,7 @@ struct RuleEditor: View {
 
                 Section {
                     Picker("Action", selection: $draft.action) {
-                        ForEach([Rule.Action.move, .delete, .changeExtension]) { action in
+                        ForEach([Rule.Action.move, .delete, .emptyTrash, .changeExtension]) { action in
                             Text(action.title).tag(action)
                         }
                         Divider()
@@ -407,6 +415,19 @@ struct RuleEditor: View {
                         TextField("Extensions", text: $draft.extensions, prompt: Text(draft.action == .changeExtension ? "txt" : "pdf, png"))
                         TextField("File name", text: $draft.namePattern, prompt: Text("Screenshot*"))
                     }
+                    if draft.action == .emptyTrash {
+                        LabeledContent("In the Trash for") {
+                            HStack(spacing: 6) {
+                                TextField("Days", value: $draft.minDaysInTrash, format: .number)
+                                    .labelsHidden()
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 56)
+                                Stepper("Days", value: $draft.minDaysInTrash, in: 0...3650)
+                                    .labelsHidden()
+                                Text(draft.minDaysInTrash == 0 ? "days or more (0: any time)" : "days or more")
+                            }
+                        }
+                    }
                     if draft.action == .changeExtension {
                         TextField("New extension", text: $draft.newExtension, prompt: Text("md"))
                     }
@@ -434,6 +455,14 @@ struct RuleEditor: View {
                 }
             }
             .formStyle(.grouped)
+            .onChange(of: draft.action) { old, new in
+                // "Delete files in Trash" always looks in the Trash; switching away gives the folder back to choose.
+                if new == .emptyTrash {
+                    draft.folderPath = Paths.trash
+                } else if old == .emptyTrash, draft.folderPath == Paths.trash {
+                    draft.folderPath = ""
+                }
+            }
 
             Divider()
             HStack {
@@ -523,6 +552,8 @@ struct RuleEditor: View {
             return "Replaces each .textClipping (text dragged out of an app into Finder) with a .txt file of the same name holding its text. The clipping goes to the Trash."
         case .extractZip:
             return "Extracts each .zip next to itself: a single item comes out as it is, several go into a folder named after the archive. The .zip goes to the Trash."
+        case .emptyTrash:
+            return conditions + "\n\nItems in the Trash that match are deleted for good and can't be put back. Folders in the Trash count by their own name. Set a number of days to keep things you binned recently, and use * as the name to match everything."
         case .createFolder:
             return "Makes a folder with this name in the rule's folder, if it isn't there yet. Nothing happens to files. YYYY, MM and DD are the date, so Scans YYYY-MM on a monthly schedule makes a new folder each month. Use / for a folder inside a folder, such as Projects/YYYY."
         }
