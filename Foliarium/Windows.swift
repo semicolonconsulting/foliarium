@@ -13,6 +13,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     enum Tab: Int { case general, rules, activity }
 
     static let contentSize = NSSize(width: 640, height: 680)
+    /// Small enough to tuck away, big enough that the Rules tab's footer and the table headers still fit.
+    static let minContentSize = NSSize(width: 560, height: 420)
+    private static let autosaveName = "SettingsWindow"
 
     private let model: AppModel
     private var window: NSWindow?
@@ -30,7 +33,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func build() {
-        let tabs = NSTabViewController()
+        let tabs = SettingsTabViewController()
         tabs.tabStyle = .toolbar
         tabs.addTabViewItem(item(GeneralView(model: model, showRules: { [weak self] in self?.show(.rules) },
                                              showActivity: { [weak self] in self?.show(.activity) }),
@@ -39,24 +42,49 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         tabs.addTabViewItem(item(ActivityView(model: model), label: "Activity", symbol: "clock.arrow.circlepath"))
 
         let window = NSWindow(contentViewController: tabs)
-        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.toolbarStyle = .preference
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.setContentSize(Self.contentSize)
-        window.center()
+        window.contentMinSize = Self.minContentSize
+        // Reopen at the size and place the window was left at; the first time, use the default size, centred.
+        if !window.setFrameUsingName(Self.autosaveName) {
+            window.setContentSize(Self.contentSize)
+            window.center()
+        }
+        window.setFrameAutosaveName(Self.autosaveName)
         self.tabs = tabs
         self.window = window
     }
 
     private func item<Content: View>(_ view: Content, label: String, symbol: String) -> NSTabViewItem {
-        let host = NSHostingController(rootView: view.frame(width: Self.contentSize.width, height: Self.contentSize.height))
+        // Each tab fills whatever size the window is. Without the empty sizing options the hosting controller
+        // would pin the window to the view's ideal size, and switching tabs would snap it back.
+        let host = NSHostingController(rootView: view.frame(minWidth: Self.minContentSize.width, maxWidth: .infinity,
+                                                            minHeight: Self.minContentSize.height, maxHeight: .infinity))
+        host.sizingOptions = []
         host.title = label
         let item = NSTabViewItem(viewController: host)
         item.label = label
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         return item
     }
+}
+
+/// Keeps the window's size when switching tabs. A toolbar-style tab view controller sizes the window to the
+/// incoming tab's view, which still has the size it had when it was last shown.
+private final class SettingsTabViewController: NSTabViewController {
+    override func tabView(_ tabView: NSTabView, willSelect tabViewItem: NSTabViewItem?) {
+        if let current = tabViewItems[safe: selectedTabViewItemIndex]?.viewController?.view,
+           let incoming = tabViewItem?.viewController?.view, incoming !== current {
+            incoming.setFrameSize(current.frame.size)
+        }
+        super.tabView(tabView, willSelect: tabViewItem)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
 
 /// Lists what Run Now would do, without changing anything.
