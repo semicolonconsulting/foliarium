@@ -76,19 +76,19 @@ struct RulesView: View {
             TableColumn("Status") { rule in
                 StatusCell(rule: rule, nextRun: model.nextRuns[rule.id])
             }
-            .width(min: 80, ideal: 95, max: 130)
+            .width(min: 80, ideal: 87, max: 130)
             TableColumn("Where") { rule in
                 WhereCell(rule: rule)
                     .opacity(rule.enabled ? 1 : 0.5)
             }
-            .width(min: 90, ideal: 140, max: 180)
+            .width(min: 90, ideal: 180, max: 180)
             TableColumn("When") { rule in
                 Text(rule.whenSummary)
                     .lineLimit(1)
                     .help(whenHelp(rule))
                     .opacity(rule.enabled ? 1 : 0.5)
             }
-            .width(min: 90, ideal: 105, max: 125)
+            .width(min: 90, ideal: 125, max: 125)
             TableColumn("What") { rule in
                 WhatCell(rule: rule)
                     .opacity(rule.enabled ? 1 : 0.5)

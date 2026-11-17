@@ -12,7 +12,7 @@ enum Windows {
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     enum Tab: Int { case general, rules, activity }
 
-    static let contentSize = NSSize(width: 640, height: 680)
+    static let contentSize = NSSize(width: 826, height: 540)
     /// Small enough to tuck away, big enough that the Rules tab's footer and the table headers still fit.
     static let minContentSize = NSSize(width: 560, height: 420)
     private static let autosaveName = "SettingsWindow"
