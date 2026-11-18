@@ -77,11 +77,11 @@ So a `.textClipping` can become `.txt`, then `.md`, and be filed by a move rule,
 - **Delete files in Trash**: looks only at the items in your Trash, and deletes the ones that match for good (they can't be put back). Folders in the Trash count by their own name, and hidden items are left alone. **In the Trash for … days or more** keeps things you binned recently. Foliarium needs Full Disk Access to read the Trash, and says so if it's missing.
 - **Create a folder**: makes a folder with the rule's name inside the rule's folder, if it isn't there yet. It doesn't touch any files. `YYYY`, `MM` and `DD` in the name are the date it's made, and `/` makes a folder inside a folder (`Projects/YYYY`). With "When files are added or changed", the folder is made when you save the rule and when Foliarium starts, and made again if it goes missing and something in the folder changes. On a schedule it's made at those times, and with "Only when I click Run Now" when you click Run Now. If a file already has that name, nothing is made and it's reported.
 
-Originals go to the Trash (Put Back works), never straight to deletion. In-progress downloads (`.download`, `.crdownload`, `.part`) are skipped. When watching, a file that changed in the last 3 seconds waits until it's been left alone, so files still being copied aren't moved halfway through.
+Originals go to the Trash (Put Back works), never straight to deletion. Only "Delete files in Trash" deletes for good, and only items already in the Trash. In-progress downloads (`.download`, `.crdownload`, `.part`) are skipped. When watching, a file that changed in the last 3 seconds waits until it's been left alone, so files still being copied aren't moved halfway through.
 
 ## Permissions
 
-The app isn't sandboxed. macOS asks once if a rule's folder is in Desktop, Documents or Downloads, or on a removable or network volume. No Automation (Finder) permission is needed.
+The app isn't sandboxed. macOS asks once if a rule's folder is in Desktop, Documents or Downloads, or on a removable or network volume. No Automation (Finder) permission is needed. "Delete files in Trash" rules also need Full Disk Access, because macOS protects the Trash: turn it on for Foliarium in System Settings → Privacy & Security → Full Disk Access, then quit and reopen Foliarium.
 
 ## Files
 
