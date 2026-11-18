@@ -25,7 +25,7 @@ Foliarium tidies your Mac's folders by itself. You write a few rules, like "PDFs
 
 <br>
 
-<img src="./docs/assets/rules-status.png" width="640" alt="The Rules tab of Foliarium's Settings window: each rule has an Automation switch, a Status such as Running, and its Where, When and What">
+<img src="./docs/assets/rules-1.0.png" width="640" alt="The Rules tab of Foliarium's Settings window: each rule has an Automation switch, a Status such as Running, and its Where, When and What">
 
 ### What it does
 
