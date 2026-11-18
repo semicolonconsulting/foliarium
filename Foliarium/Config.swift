@@ -187,10 +187,15 @@ struct Rule: Codable, Identifiable, Hashable {
     /// match every file, so at least one is required ("*" in the name field matches everything on purpose).
     var problem: String? {
         if folderPath.isEmpty { return "Choose a folder to look in." }
+        if action == .emptyTrash && !Edition.canEmptyTrash { return "The App Store edition can't delete files from the Trash." }
+        if action != .emptyTrash && !FolderAccess.canUse(folderPath) {
+            return "Choose the folder again so Foliarium is allowed to use it."
+        }
         if action.usesConditions && !hasCondition { return "Fill in at least one condition." }
         switch action {
         case .move:
             if destinationPath.isEmpty { return "Choose a folder to move files to." }
+            if !FolderAccess.canUse(destinationPath) { return "Choose the folder to move to again so Foliarium is allowed to use it." }
             if renamePattern.contains("/") || renamePattern.contains(":") { return "The new name can't contain / or :." }
         case .changeExtension:
             if cleanNewExtension.isEmpty { return "Type the new extension." }
@@ -512,7 +517,7 @@ enum FileKind: String, Codable, CaseIterable, Identifiable {
 enum ConfigStore {
     static var url: URL {
         if let custom = UserDefaults.standard.string(forKey: "configPath"), !custom.isEmpty {
-            return URL(fileURLWithPath: (custom as NSString).expandingTildeInPath)
+            return URL(fileURLWithPath: Paths.expand(custom))
         }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support.appendingPathComponent("Foliarium/config.json")
@@ -569,13 +574,27 @@ enum ConfigStore {
 }
 
 enum Paths {
+    /// The user's home folder. In the App Store edition NSHomeDirectory() is the app's sandbox container,
+    /// so this asks the user database instead.
+    static let home: String = {
+        if let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir { return String(cString: dir) }
+        return NSHomeDirectory()
+    }()
+
     /// The Trash on the startup disk. Reading it needs Full Disk Access.
-    static var trash: String { (NSHomeDirectory() as NSString).appendingPathComponent(".Trash") }
+    static var trash: String { (home as NSString).appendingPathComponent(".Trash") }
+
+    /// The path with a leading ~ replaced by the home folder.
+    static func expand(_ path: String) -> String {
+        if path == "~" { return home }
+        if path.hasPrefix("~/") { return home + path.dropFirst() }
+        return path
+    }
 
     /// The real path, with symlinks resolved (/tmp → /private/tmp), as FSEvents reports it.
     /// Nil when nothing exists there.
     static func canonical(_ path: String) -> String? {
-        let expanded = (path as NSString).expandingTildeInPath
+        let expanded = expand(path)
         guard let resolved = realpath(expanded, nil) else { return nil }
         defer { free(resolved) }
         return String(cString: resolved)
@@ -589,7 +608,6 @@ enum Paths {
 
     /// The path with the home folder shown as ~.
     static func display(_ path: String) -> String {
-        let home = NSHomeDirectory()
         if path == home { return "~" }
         if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
         return path

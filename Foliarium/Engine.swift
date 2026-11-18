@@ -156,7 +156,7 @@ final class Engine {
             var destination: String?
             var protected: String?
             if rule.action == .move {
-                let expanded = (rule.destinationPath as NSString).expandingTildeInPath
+                let expanded = Paths.expand(rule.destinationPath)
                 let resolvedDestination = Paths.canonical(expanded) ?? (expanded as NSString).standardizingPath
                 destination = resolvedDestination
                 if resolvedDestination != folder, Paths.isInside(resolvedDestination, folder) { protected = resolvedDestination }

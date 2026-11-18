@@ -15,6 +15,32 @@ cd foliarium
 
 A copy you build yourself isn't notarized. On another Mac, its first launch is blocked with a message that macOS "could not verify" it. To allow it, open System Settings → Privacy & Security, scroll down to the message about Foliarium and click **Open Anyway**. You only need to do this once.
 
+## Release
+
+```bash
+./scripts/release.sh
+```
+
+`release.sh` builds the app, signs it with your Developer ID Application certificate, has Apple notarize it and makes `build/Foliarium-<version>.dmg`, also signed, notarized and stapled, so it opens on any Mac without a warning. The version comes from `MARKETING_VERSION` in the Xcode project. It needs a notarytool keychain profile called `notary`, which you make once:
+
+```bash
+xcrun notarytool store-credentials notary --apple-id <your Apple ID> --team-id C6ZRF9KM22 --password <app-specific password>
+```
+
+Set `NOTARY_PROFILE` to use another profile. If Apple rejects the app, the script prints the notary log.
+
+## App Store edition
+
+The App Store edition is the same code, built in the App Sandbox. There it can only use folders you choose in the rule editor, which it remembers with security-scoped bookmarks, and it has no "Delete files in Trash" action, because a sandboxed app can't read the Trash. A rule whose folder it isn't allowed to use shows "Needs access" until you choose the folder again.
+
+```bash
+EDITION=appstore ./scripts/build-app.sh   # a sandboxed build to try locally
+./scripts/appstore.sh                     # build/appstore/Foliarium.pkg, signed for the Mac App Store
+UPLOAD=1 ./scripts/appstore.sh            # the same, uploaded to App Store Connect
+```
+
+`appstore.sh` needs the app's record in App Store Connect and Xcode signed in to the team's Apple account, so it can make the App Store provisioning profile. Each upload needs a higher build number: raise `CURRENT_PROJECT_VERSION` or set `BUILD_NUMBER`. The sandbox settings live in `Config/Foliarium-AppStore.entitlements`.
+
 ## Launch arguments
 
 Launch arguments, handy for screenshots and testing:
@@ -44,5 +70,7 @@ open -n build/Foliarium.app --args -configPath /tmp/ft/config.json -openSettings
 | `Foliarium/ActivityView.swift` | The Activity tab and the Preview list |
 | `Foliarium/LoginItem.swift` | Open at Login |
 | `Config/Info.plist` | The app's Info.plist |
-| `scripts/` | `build-app.sh` and `install-local.sh` |
+| `Foliarium/FolderAccess.swift` | The App Store edition's sandbox: which folders it may use, and the edition's limits |
+| `Config/Foliarium-AppStore.entitlements` | The App Store edition's sandbox entitlements |
+| `scripts/` | `build-app.sh`, `install-local.sh`, `release.sh` and `appstore.sh` |
 | `docs/` | The guide, this page, and the pictures in the README |

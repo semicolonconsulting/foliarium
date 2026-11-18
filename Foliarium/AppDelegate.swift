@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var subscriptions = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Before anything checks the rules: in the App Store edition a rule can only use folders the user chose.
+        FolderAccess.restore()
         installMainMenu()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

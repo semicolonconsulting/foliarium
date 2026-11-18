@@ -103,8 +103,12 @@ final class AppModel: ObservableObject {
         panel.prompt = "Choose"
         panel.message = message
         if let start, !start.isEmpty { panel.directoryURL = URL(fileURLWithPath: start) }
-        guard panel.runModal() == .OK, let path = panel.url?.path else { return nil }
-        guard toLookIn else { return path }
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        let path = url.path
+        guard toLookIn else {
+            FolderAccess.remember(url)
+            return path
+        }
         if path == "/" {
             let alert = NSAlert()
             alert.messageText = "The whole disk can't be a rule's folder."
@@ -112,7 +116,7 @@ final class AppModel: ObservableObject {
             alert.runModal()
             return nil
         }
-        if path == NSHomeDirectory() {
+        if path == Paths.home {
             let confirm = NSAlert()
             confirm.messageText = "Use your whole home folder?"
             confirm.informativeText = "Every file in it, and in every folder inside it, would be checked against this rule. A smaller folder is usually safer."
@@ -120,13 +124,16 @@ final class AppModel: ObservableObject {
             confirm.addButton(withTitle: "Cancel")
             guard confirm.runModal() == .alertFirstButtonReturn else { return nil }
         }
+        FolderAccess.remember(url)
         return path
     }
 
     /// A rule that's turned on whose folder is missing.
     private func missingFolderProblem() -> String? {
         for rule in config.rules where rule.enabled && !rule.folderPath.isEmpty {
-            if Paths.canonical(rule.folderPath) == nil { return "The folder “\(rule.folderName)” can't be found" }
+            if FolderAccess.canUse(rule.folderPath) && Paths.canonical(rule.folderPath) == nil {
+                return "The folder “\(rule.folderName)” can't be found"
+            }
         }
         return nil
     }

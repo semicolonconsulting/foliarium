@@ -209,6 +209,9 @@ private struct StatusCell: View {
 
     private var state: (text: String, color: Color, help: String) {
         if !rule.enabled { return ("Off", .secondary, "Turned off: this rule doesn't run, not even with Run Now") }
+        if !rule.folderPath.isEmpty && rule.action != .emptyTrash && !FolderAccess.canUse(rule.folderPath) {
+            return ("Needs access", .orange, "Open the rule and choose its folder again, so Foliarium is allowed to use it")
+        }
         if !rule.folderPath.isEmpty && Paths.canonical(rule.folderPath) == nil {
             return ("Folder missing", .orange, "The folder “\(rule.folderName)” can't be found")
         }
@@ -242,7 +245,9 @@ private struct StatusCell: View {
 private struct WhereCell: View {
     let rule: Rule
 
-    private var missing: Bool { !rule.folderPath.isEmpty && Paths.canonical(rule.folderPath) == nil }
+    private var missing: Bool {
+        !rule.folderPath.isEmpty && FolderAccess.canUse(rule.folderPath) && Paths.canonical(rule.folderPath) == nil
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -385,7 +390,7 @@ struct RuleEditor: View {
 
                 Section {
                     Picker("Action", selection: $draft.action) {
-                        ForEach([Rule.Action.move, .delete, .emptyTrash, .changeExtension]) { action in
+                        ForEach([Rule.Action.move, .delete] + (Edition.canEmptyTrash ? [.emptyTrash] : []) + [.changeExtension]) { action in
                             Text(action.title).tag(action)
                         }
                         Divider()
