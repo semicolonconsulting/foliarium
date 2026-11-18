@@ -30,7 +30,13 @@ find "$APP/Contents" -depth \( -name "*.framework" -o -name "*.dylib" -o -name "
     | while IFS= read -r -d '' item; do
         codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$item"
     done
-codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "$SIGN_IDENTITY" "$APP"
+# Keep the app's entitlements, minus get-task-allow: Xcode adds that for debugging, and notarization rejects it.
+ENTITLEMENTS="build/Foliarium.entitlements"
+codesign -d --entitlements :- "$APP" > "$ENTITLEMENTS" 2>/dev/null || true
+[[ -s "$ENTITLEMENTS" ]] || echo '<plist version="1.0"><dict/></plist>' > "$ENTITLEMENTS"
+/usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" "$ENTITLEMENTS" 2>/dev/null || true
+codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$APP"
+rm -f "$ENTITLEMENTS"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 # Sends a file to Apple's notary service, waits for the verdict and prints the log if it's rejected.
