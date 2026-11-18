@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum ActionKind: String {
-    case webloc, alias, move, delete, extensionChange, clipping, zip
+    case webloc, alias, move, delete, extensionChange, clipping, zip, folder, purge
 
     var title: String {
         switch self {
@@ -13,6 +13,8 @@ enum ActionKind: String {
         case .extensionChange: return "New extension"
         case .clipping: return "Clipping → Text"
         case .zip: return "Extract .zip"
+        case .folder: return "New folder"
+        case .purge: return "Deleted from Trash"
         }
     }
 
@@ -25,6 +27,8 @@ enum ActionKind: String {
         case .extensionChange: return "pencil"
         case .clipping: return "doc.plaintext"
         case .zip: return "doc.zipper"
+        case .folder: return "folder.badge.plus"
+        case .purge: return "trash.slash"
         }
     }
 }
@@ -72,12 +76,16 @@ struct RunReport {
         let done = records.filter { $0.status == .done }
         let moved = done.filter { $0.kind == .move }.count
         let deleted = done.filter { $0.kind == .delete }.count
-        let converted = done.count - moved - deleted
+        let created = done.filter { $0.kind == .folder }.count
+        let purged = done.filter { $0.kind == .purge }.count
+        let converted = done.count - moved - deleted - created - purged
         let planned = records.filter { $0.status == .planned }.count
         let failed = records.filter(\.failed).count
         if converted > 0 { parts.append("\(converted) converted") }
         if moved > 0 { parts.append("\(moved) moved") }
         if deleted > 0 { parts.append("\(deleted) deleted") }
+        if purged > 0 { parts.append("\(purged) deleted from the Trash") }
+        if created > 0 { parts.append(created == 1 ? "1 folder created" : "\(created) folders created") }
         if planned > 0 { parts.append(planned == 1 ? "1 change" : "\(planned) changes") }
         if failed > 0 { parts.append("\(failed) failed") }
         if let problem = problems.first { parts.append(problem) }
@@ -115,6 +123,10 @@ final class Engine {
     private let trash: Trash
     private let fm = FileManager.default
     private let rules: [Resolved]
+    /// "Create a folder" rules. They don't look at files, so they're kept apart from `rules`.
+    private let folderRules: [Resolved]
+    /// "Delete files in Trash" rules. They go through the Trash's own items, so they're kept apart too.
+    private let trashRules: [Resolved]
     /// Rule folders that can't be found.
     private let missing: [String]
     private var report = RunReport()
@@ -130,9 +142,13 @@ final class Engine {
         self.settleTime = settleTime
         self.trash = trash
         var resolved: [Resolved] = []
+        var folderRules: [Resolved] = []
+        var trashRules: [Resolved] = []
         var missing: [String] = []
         for rule in rules where rule.isUsable {
-            guard let folder = Paths.canonical(rule.folderPath) else {
+            // "Delete files in Trash" always works in the Trash, whatever folder the settings file names, so a
+            // hand-edited or stale folder can never make it delete anything outside the Trash.
+            guard let folder = Paths.canonical(rule.action == .emptyTrash ? Paths.trash : rule.folderPath) else {
                 let message = "The folder “\(rule.folderName)” can't be found"
                 if !missing.contains(message) { missing.append(message) }
                 continue
@@ -145,9 +161,18 @@ final class Engine {
                 destination = resolvedDestination
                 if resolvedDestination != folder, Paths.isInside(resolvedDestination, folder) { protected = resolvedDestination }
             }
-            resolved.append(Resolved(rule: rule, folder: folder, destination: destination, protected: protected))
+            let item = Resolved(rule: rule, folder: folder, destination: destination, protected: protected)
+            if rule.action.handlesFiles {
+                resolved.append(item)
+            } else if rule.action == .emptyTrash {
+                trashRules.append(item)
+            } else {
+                folderRules.append(item)
+            }
         }
         self.rules = resolved
+        self.folderRules = folderRules
+        self.trashRules = trashRules
         self.missing = missing
     }
 
@@ -168,6 +193,13 @@ final class Engine {
         reserved = []
         vacated = []
         for message in missing { noteProblem(message) }
+        // A full run makes every rule's folder; a run for changes, the folders of rules where something changed.
+        for rule in folderRules where items?.contains(where: { Paths.isInside($0.path, rule.folder) }) ?? true {
+            createFolder(rule)
+        }
+        for rule in trashRules where items?.contains(where: { Paths.isInside($0.path, rule.folder) }) ?? true {
+            emptyTrash(rule)
+        }
         guard !rules.isEmpty else { return report }
 
         var files: [String] = []
@@ -612,6 +644,72 @@ final class Engine {
             record(.move, path, target, .done)
         } catch {
             record(.move, path, target, .failed(error.localizedDescription))
+        }
+    }
+
+    // MARK: Create a folder
+
+    /// Makes the rule's folder inside the rule's own folder, along with any folders on the way. A folder that's
+    /// already there is left as it is, quietly.
+    private func createFolder(_ rule: Resolved) {
+        let name = rule.rule.folderToCreate(date: Date())
+        guard !name.isEmpty else { return }
+        let path = (rule.folder as NSString).appendingPathComponent(name)
+        var isFolder: ObjCBool = false
+        if fm.fileExists(atPath: path, isDirectory: &isFolder) {
+            if !isFolder.boolValue { record(.folder, path, path, .failed("A file with that name is already there")) }
+            return
+        }
+        if dryRun {
+            guard reserved.insert(path).inserted else { return }
+            record(.folder, path, path, .planned)
+            return
+        }
+        do {
+            try fm.createDirectory(atPath: path, withIntermediateDirectories: true)
+            record(.folder, path, path, .done)
+        } catch {
+            record(.folder, path, path, .failed(error.localizedDescription))
+        }
+    }
+
+    // MARK: Delete files in Trash
+
+    /// Deletes for good the items at the top of the Trash that match the rule: files, and folders by their own
+    /// name. Nothing outside the Trash is ever touched. Hidden items such as .DS_Store are left alone.
+    private func emptyTrash(_ rule: Resolved) {
+        let keys: [URLResourceKey] = [.contentTypeKey, .addedToDirectoryDateKey]
+        let items: [URL]
+        do {
+            items = try fm.contentsOfDirectory(at: URL(fileURLWithPath: rule.folder), includingPropertiesForKeys: keys,
+                                               options: [.skipsHiddenFiles])
+        } catch {
+            noteProblem("Foliarium can't read the Trash. Turn on Full Disk Access for it in System Settings → Privacy & Security.")
+            return
+        }
+        let now = Date()
+        let minimumAge = TimeInterval(max(rule.rule.minDaysInTrash, 0)) * 86_400
+        for url in items.sorted(by: { $0.path < $1.path }) {
+            let path = url.path
+            guard Paths.isInside(path, rule.folder), path != rule.folder, !vacated.contains(path) else { continue }
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            if minimumAge > 0 {
+                // Without a date it went in, the item's age is unknown, so it stays.
+                guard let added = values?.addedToDirectoryDate, now.timeIntervalSince(added) >= minimumAge else { continue }
+            }
+            guard rule.rule.matches(name: url.lastPathComponent, type: values?.contentType) else { continue }
+            if dryRun {
+                vacated.insert(path)
+                record(.purge, path, nil, .planned)
+                continue
+            }
+            do {
+                try fm.removeItem(at: url)
+                vacated.insert(path)
+                record(.purge, path, nil, .done)
+            } catch {
+                record(.purge, path, nil, .failed("Couldn't delete it: \(error.localizedDescription)"))
+            }
         }
     }
 

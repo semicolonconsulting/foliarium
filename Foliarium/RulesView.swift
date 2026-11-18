@@ -61,27 +61,34 @@ struct RulesView: View {
 
     private var table: some View {
         Table(of: Rule.self, selection: $selection) {
-            TableColumn("Auto") { rule in
+            TableColumn("Automation") { rule in
                 Toggle("Turned on", isOn: enabledBinding(rule.id))
                     .toggleStyle(.switch)
                     .controlSize(.mini)
+                    // Smaller than the smallest control size, so the switch doesn't crowd the row.
+                    .scaleEffect(0.8)
                     .tint(.green)
                     .labelsHidden()
                     .help(rule.enabled ? "On: turn this rule off" : "Off: turn this rule on")
+                    .frame(maxWidth: .infinity)
             }
-            .width(36)
+            .width(70)
+            TableColumn("Status") { rule in
+                StatusCell(rule: rule, nextRun: model.nextRuns[rule.id])
+            }
+            .width(min: 80, ideal: 87, max: 130)
             TableColumn("Where") { rule in
                 WhereCell(rule: rule)
                     .opacity(rule.enabled ? 1 : 0.5)
             }
-            .width(min: 90, ideal: 140, max: 180)
+            .width(min: 90, ideal: 180, max: 180)
             TableColumn("When") { rule in
                 Text(rule.whenSummary)
                     .lineLimit(1)
                     .help(whenHelp(rule))
                     .opacity(rule.enabled ? 1 : 0.5)
             }
-            .width(min: 90, ideal: 105, max: 125)
+            .width(min: 90, ideal: 125, max: 125)
             TableColumn("What") { rule in
                 WhatCell(rule: rule)
                     .opacity(rule.enabled ? 1 : 0.5)
@@ -152,7 +159,8 @@ struct RulesView: View {
     private func add() {
         var rule = Rule()
         if let base = model.config.rules.first(where: { $0.id == selection }) ?? model.config.rules.last {
-            rule.folderPath = base.folderPath
+            // A Trash rule's folder is the Trash, which a new rule shouldn't start in.
+            if base.action != .emptyTrash { rule.folderPath = base.folderPath }
             rule.includeSubfolders = base.includeSubfolders
             rule.trigger = base.trigger
         }
@@ -193,6 +201,44 @@ struct RulesView: View {
     }
 }
 
+/// The Status column: a coloured dot and a word for what the rule is doing. Green while it runs by itself,
+/// orange when something needs fixing, grey when it's off or waits for Run Now.
+private struct StatusCell: View {
+    let rule: Rule
+    let nextRun: Date?
+
+    private var state: (text: String, color: Color, help: String) {
+        if !rule.enabled { return ("Off", .secondary, "Turned off: this rule doesn't run, not even with Run Now") }
+        if !rule.folderPath.isEmpty && Paths.canonical(rule.folderPath) == nil {
+            return ("Folder missing", .orange, "The folder “\(rule.folderName)” can't be found")
+        }
+        if let problem = rule.problem { return ("Needs setup", .orange, problem) }
+        switch rule.trigger {
+        case .changes:
+            return ("Running", .green, "Watching for files added or changed")
+        case .schedule:
+            let next = nextRun.map { ". Next run: \(Schedule.whenText($0))" } ?? ""
+            return ("Running", .green, "\(rule.schedule.description)\(next)")
+        case .manual:
+            return ("Manual", .secondary, "Runs only when you click Run Now")
+        }
+    }
+
+    var body: some View {
+        let state = state
+        HStack(spacing: 6) {
+            Circle()
+                .fill(state.color)
+                .frame(width: 8, height: 8)
+            Text(state.text)
+                .lineLimit(1)
+                .foregroundStyle(rule.enabled ? .primary : .secondary)
+        }
+        .help(state.help)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct WhereCell: View {
     let rule: Rule
 
@@ -212,7 +258,7 @@ private struct WhereCell: View {
             Text(rule.folderName)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if !rule.includeSubfolders {
+            if rule.action.handlesFiles && !rule.includeSubfolders {
                 Text("top level")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -225,6 +271,7 @@ private struct WhereCell: View {
         if rule.folderPath.isEmpty { return "No folder chosen" }
         let path = Paths.display(rule.folderPath)
         if missing { return "\(path) can't be found" }
+        if !rule.action.handlesFiles { return path }
         return rule.includeSubfolders ? "\(path) and the folders inside it" : "\(path), without the folders inside it"
     }
 }
@@ -264,17 +311,28 @@ struct RuleEditor: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    LabeledContent("Folder") {
-                        folderButton(draft.folderPath, empty: "No folder chosen") {
-                            AppModel.chooseFolder(message: "Choose the folder this rule looks in.",
-                                                  startingAt: draft.folderPath, toLookIn: true)
-                        } set: { draft.folderPath = $0 }
+                    if draft.action == .emptyTrash {
+                        LabeledContent("Folder") {
+                            Label("Trash", systemImage: "trash")
+                        }
+                    } else {
+                        LabeledContent("Folder") {
+                            folderButton(draft.folderPath, empty: "No folder chosen") {
+                                AppModel.chooseFolder(message: "Choose the folder this rule looks in.",
+                                                      startingAt: draft.folderPath, toLookIn: true)
+                            } set: { draft.folderPath = $0 }
+                        }
                     }
-                    Toggle("Also look in subfolders", isOn: $draft.includeSubfolders)
+                    if draft.action.handlesFiles {
+                        Toggle("Also look in subfolders", isOn: $draft.includeSubfolders)
+                    }
                 } header: {
                     Text("Where")
                 } footer: {
-                    Text("Hidden files and the contents of apps are left alone.")
+                    Text(draft.action == .emptyTrash
+                         ? "Only items already in your Trash are deleted. Foliarium needs Full Disk Access to read the Trash: turn it on in System Settings → Privacy & Security → Full Disk Access."
+                         : draft.action.handlesFiles ? "Hidden files and the contents of apps are left alone."
+                                                     : "The new folder is made inside this folder.")
                         .foregroundStyle(.secondary)
                 }
 
@@ -327,12 +385,26 @@ struct RuleEditor: View {
 
                 Section {
                     Picker("Action", selection: $draft.action) {
-                        ForEach([Rule.Action.move, .delete, .changeExtension]) { action in
+                        ForEach([Rule.Action.move, .delete, .emptyTrash, .changeExtension]) { action in
                             Text(action.title).tag(action)
                         }
                         Divider()
                         ForEach([Rule.Action.convertAliases, .convertWeblocs, .convertTextClippings, .extractZip]) { action in
                             Text(action.title).tag(action)
+                        }
+                        Divider()
+                        Text(Rule.Action.createFolder.title).tag(Rule.Action.createFolder)
+                    }
+                    if draft.action == .createFolder {
+                        TextField("Folder name", text: $draft.newFolderName, prompt: Text("Invoices"))
+                        if draft.problem == nil {
+                            LabeledContent("Today") {
+                                Text(Paths.display((draft.folderPath as NSString)
+                                    .appendingPathComponent(draft.folderToCreate(date: Date()))))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     if draft.action.usesConditions {
@@ -343,6 +415,19 @@ struct RuleEditor: View {
                         }
                         TextField("Extensions", text: $draft.extensions, prompt: Text(draft.action == .changeExtension ? "txt" : "pdf, png"))
                         TextField("File name", text: $draft.namePattern, prompt: Text("Screenshot*"))
+                    }
+                    if draft.action == .emptyTrash {
+                        LabeledContent("In the Trash for") {
+                            HStack(spacing: 6) {
+                                TextField("Days", value: $draft.minDaysInTrash, format: .number)
+                                    .labelsHidden()
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 56)
+                                Stepper("Days", value: $draft.minDaysInTrash, in: 0...3650)
+                                    .labelsHidden()
+                                Text(draft.minDaysInTrash == 0 ? "days or more (0: any time)" : "days or more")
+                            }
+                        }
                     }
                     if draft.action == .changeExtension {
                         TextField("New extension", text: $draft.newExtension, prompt: Text("md"))
@@ -371,6 +456,14 @@ struct RuleEditor: View {
                 }
             }
             .formStyle(.grouped)
+            .onChange(of: draft.action) { old, new in
+                // "Delete files in Trash" always looks in the Trash; switching away gives the folder back to choose.
+                if new == .emptyTrash {
+                    draft.folderPath = Paths.trash
+                } else if old == .emptyTrash, draft.folderPath == Paths.trash {
+                    draft.folderPath = ""
+                }
+            }
 
             Divider()
             HStack {
@@ -401,6 +494,16 @@ struct RuleEditor: View {
     }
 
     private var whenFooter: String {
+        if draft.action == .createFolder {
+            switch draft.trigger {
+            case .changes:
+                return "The folder is made when you save the rule and when Foliarium starts, and made again a few seconds after anything in the folder changes, if it's missing then."
+            case .schedule:
+                return "The folder is made at these times, if it's missing then. If the Mac is asleep or Foliarium isn't running, the rule runs once as soon as it can."
+            case .manual:
+                return "The folder is made when you click Run Now, if it's missing. Run Now is in the General tab and the menu bar."
+            }
+        }
         switch draft.trigger {
         case .changes:
             return "Files are handled a few seconds after they arrive, even if Foliarium wasn't running then. Files that are already there wait for Run Now."
@@ -450,6 +553,10 @@ struct RuleEditor: View {
             return "Replaces each .textClipping (text dragged out of an app into Finder) with a .txt file of the same name holding its text. The clipping goes to the Trash."
         case .extractZip:
             return "Extracts each .zip next to itself: a single item comes out as it is, several go into a folder named after the archive. The .zip goes to the Trash."
+        case .emptyTrash:
+            return conditions + "\n\nItems in the Trash that match are deleted for good and can't be put back. Folders in the Trash count by their own name. Set a number of days to keep things you binned recently, and use * as the name to match everything."
+        case .createFolder:
+            return "Makes a folder with this name in the rule's folder, if it isn't there yet. Nothing happens to files. YYYY, MM and DD are the date, so Scans YYYY-MM on a monthly schedule makes a new folder each month. Use / for a folder inside a folder, such as Projects/YYYY."
         }
     }
 

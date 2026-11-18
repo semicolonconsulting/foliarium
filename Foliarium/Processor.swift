@@ -41,6 +41,7 @@ final class Processor {
             self.lastRuns = ScheduleState.load()
             self.updateSchedules()
             self.runDueSchedules()
+            self.makeFolders(self.folderRules)
         }
     }
 
@@ -49,7 +50,18 @@ final class Processor {
             self.config = config
             self.updateWatchers(resume: false)
             self.updateSchedules()
+            self.makeFolders(self.folderRules.filter { !previous.rules.contains($0) })
         }
+    }
+
+    /// "Create a folder" rules that run when files change: their folders are made straight away (at launch, and
+    /// when a rule is added or changed), not only once something in the folder changes.
+    private var folderRules: [Rule] {
+        watchRules.filter { $0.action == .createFolder }
+    }
+
+    private func makeFolders(_ rules: [Rule]) {
+        if !rules.isEmpty { run(nil, rules: rules, trigger: .watch) }
     }
 
     func runNow() {
