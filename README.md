@@ -29,9 +29,10 @@ Foliarium tidies your Mac's folders by itself. You write a few rules, like "PDFs
 
 ### What it does
 
-- **Rules for any folder.** Each rule says where to look, when to run (as files arrive, on a schedule, or only when you click Run Now) and what to do: move, delete or rename files that match a kind, an extension or a name pattern.
+- **Rules for any folder.** Each rule says where to look, when to run (as files arrive, on a schedule, or only when you click Run Now) and what to do: move files, move them to the Trash or change their extension, picking them by kind, extension or name pattern.
 - **Converts the awkward files.** Finder aliases become symlinks, `.webloc` bookmarks become Windows `.url` files, `.textClipping` files become `.txt`, and `.zip` archives are extracted.
-- **Nothing is lost.** Originals go to the Trash, where Put Back works, and nothing is overwritten. Preview shows what Run Now would do before it does it, and Activity lists everything that was done.
+- **Makes folders and empties the Trash.** A rule can create a folder with a name you choose, dated if you like ("Scans 2026-11"), and another can delete matching items from the Trash for good, optionally only once they've been there for some days.
+- **Nothing is lost by accident.** Originals go to the Trash, where Put Back works, and nothing is overwritten. Only a "Delete files in Trash" rule you set up deletes anything for good, and only items already in the Trash. Preview shows what Run Now would do before it does it, and Activity lists everything that was done.
 
 ### Install
 
