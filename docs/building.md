@@ -29,6 +29,18 @@ xcrun notarytool store-credentials notary --apple-id <your Apple ID> --team-id C
 
 Set `NOTARY_PROFILE` to use another profile. If Apple rejects the app, the script prints the notary log.
 
+## App Store edition
+
+The App Store edition is the same code, built in the App Sandbox. There it can only use folders you choose in the rule editor, which it remembers with security-scoped bookmarks, and it has no "Delete files in Trash" action, because a sandboxed app can't read the Trash. A rule whose folder it isn't allowed to use shows "Needs access" until you choose the folder again.
+
+```bash
+EDITION=appstore ./scripts/build-app.sh   # a sandboxed build to try locally
+./scripts/appstore.sh                     # build/appstore/Foliarium.pkg, signed for the Mac App Store
+UPLOAD=1 ./scripts/appstore.sh            # the same, uploaded to App Store Connect
+```
+
+`appstore.sh` needs the app's record in App Store Connect and Xcode signed in to the team's Apple account, so it can make the App Store provisioning profile. Each upload needs a higher build number: raise `CURRENT_PROJECT_VERSION` or set `BUILD_NUMBER`. The sandbox settings live in `Config/Foliarium-AppStore.entitlements`.
+
 ## Launch arguments
 
 Launch arguments, handy for screenshots and testing:
@@ -58,5 +70,7 @@ open -n build/Foliarium.app --args -configPath /tmp/ft/config.json -openSettings
 | `Foliarium/ActivityView.swift` | The Activity tab and the Preview list |
 | `Foliarium/LoginItem.swift` | Open at Login |
 | `Config/Info.plist` | The app's Info.plist |
-| `scripts/` | `build-app.sh`, `install-local.sh` and `release.sh` |
+| `Foliarium/FolderAccess.swift` | The App Store edition's sandbox: which folders it may use, and the edition's limits |
+| `Config/Foliarium-AppStore.entitlements` | The App Store edition's sandbox entitlements |
+| `scripts/` | `build-app.sh`, `install-local.sh`, `release.sh` and `appstore.sh` |
 | `docs/` | The guide, this page, and the pictures in the README |
