@@ -42,6 +42,10 @@ Download the latest release from [Releases](https://github.com/semicolonconsulti
 
 Bugs and ideas are welcome in [GitHub Issues](https://github.com/semicolonconsulting/foliarium/issues). To build the app yourself, see [Build from source](docs/building.md).
 
+### Privacy
+
+Foliarium collects no data. See [Privacy](docs/privacy.md).
+
 ### License
 
 MIT. See [LICENSE](LICENSE).
