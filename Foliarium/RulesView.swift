@@ -16,7 +16,7 @@ struct RulesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Rules are checked from top to bottom, and the first move or delete rule that matches a file decides what happens to it. Files already inside a rule's destination folder stay where they are. Use a rule's switch to turn it off.")
+            Text("Rules are checked from top to bottom, and the first move, copy or delete rule that matches a file decides what happens to it, along with any actions it runs after that. Files already inside a rule's destination folder stay where they are. Use a rule's switch to turn it off.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -390,7 +390,7 @@ struct RuleEditor: View {
 
                 Section {
                     Picker("Action", selection: $draft.action) {
-                        ForEach([Rule.Action.move, .delete] + (Edition.canEmptyTrash ? [.emptyTrash] : []) + [.changeExtension]) { action in
+                        ForEach([Rule.Action.move, .copy, .delete] + (Edition.canEmptyTrash ? [.emptyTrash] : []) + [.changeExtension]) { action in
                             Text(action.title).tag(action)
                         }
                         Divider()
@@ -437,10 +437,10 @@ struct RuleEditor: View {
                     if draft.action == .changeExtension {
                         TextField("New extension", text: $draft.newExtension, prompt: Text("md"))
                     }
-                    if draft.action == .move {
-                        LabeledContent("Move to") {
+                    if draft.action == .move || draft.action == .copy {
+                        LabeledContent(draft.action == .move ? "Move to" : "Copy to") {
                             folderButton(draft.destinationPath, empty: "No folder chosen") {
-                                AppModel.chooseFolder(message: "Choose the folder that matching files are moved to.",
+                                AppModel.chooseFolder(message: "Choose the folder that matching files are \(draft.action == .move ? "moved" : "copied") to.",
                                                       startingAt: draft.destinationPath.isEmpty ? draft.folderPath : draft.destinationPath,
                                                       toLookIn: false)
                             } set: { draft.destinationPath = $0 }
@@ -458,6 +458,29 @@ struct RuleEditor: View {
                 } footer: {
                     Text(whatFooter)
                         .foregroundStyle(.secondary)
+                }
+
+                if draft.action.allowsFollowUps {
+                    ForEach($draft.followUps) { $step in
+                        let number = (draft.followUps.firstIndex { $0.id == step.id } ?? 0) + 1
+                        Section {
+                            followUpRows($step, number: number)
+                        } header: {
+                            if number == 1 { Text("Then") }
+                        }
+                    }
+                    Section {
+                        Button {
+                            draft.followUps.append(FollowUp(kind: draft.action == .copy ? .move : .copy))
+                        } label: {
+                            Label(draft.followUps.isEmpty ? "Add an Action After This One" : "Add Another Action", systemImage: "plus")
+                        }
+                    } header: {
+                        if draft.followUps.isEmpty { Text("Then") }
+                    } footer: {
+                        Text(thenFooter)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -546,6 +569,8 @@ struct RuleEditor: View {
         switch draft.action {
         case .move:
             return conditions + "\n\nRename to: * is the original name, and YYYY, MM and DD are the date of the move, so YYYYMMDD_* gives \(Rule.exampleRename). The extension stays, and a name that already starts with a date keeps it."
+        case .copy:
+            return conditions + "\n\nThe original stays where it is, and each file is copied to the folder once, even if it changes or is renamed later. Nothing is overwritten: if the name is taken, the copy gets a number. Rename to names the copy: * is the original name, and YYYY, MM and DD are the date, so YYYYMMDD_* gives \(Rule.exampleRename)."
         case .delete:
             return conditions + "\n\nMatching files go to the Trash, where Put Back works. With “When files are added or changed”, a new matching file is deleted a few seconds after it arrives."
         case .changeExtension:
@@ -562,6 +587,60 @@ struct RuleEditor: View {
             return conditions + "\n\nItems in the Trash that match are deleted for good and can't be put back. Folders in the Trash count by their own name. Set a number of days to keep things you binned recently, and use * as the name to match everything."
         case .createFolder:
             return "Makes a folder with this name in the rule's folder, if it isn't there yet. Nothing happens to files. YYYY, MM and DD are the date, so Scans YYYY-MM on a monthly schedule makes a new folder each month. Use / for a folder inside a folder, such as Projects/YYYY."
+        }
+    }
+
+    private var thenFooter: String {
+        let start = draft.action == .copy
+            ? "These run in order after the copy, on the original file."
+            : "These run in order after the move, on the moved file."
+        return start + " For example, copy to a backup folder, then move to an archive, or move, then rename. Move to Trash ends the list."
+    }
+
+    /// One follow-up action: what it is, a button to remove it, and its settings.
+    @ViewBuilder
+    private func followUpRows(_ step: Binding<FollowUp>, number: Int) -> some View {
+        let value = step.wrappedValue
+        LabeledContent("\(number).") {
+            HStack(spacing: 8) {
+                Picker("Action", selection: step.kind) {
+                    ForEach(FollowUp.Kind.allCases) { kind in
+                        Label(kind.title, systemImage: kind.symbol).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Button {
+                    draft.followUps.removeAll { $0.id == value.id }
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove this action")
+            }
+        }
+        switch value.kind {
+        case .copy, .move:
+            LabeledContent(value.kind == .copy ? "Copy to" : "Move to") {
+                folderButton(value.destinationPath, empty: "No folder chosen") {
+                    AppModel.chooseFolder(message: "Choose the folder that files are \(value.kind == .copy ? "copied" : "moved") to.",
+                                          startingAt: value.destinationPath.isEmpty ? draft.destinationPath : value.destinationPath,
+                                          toLookIn: false)
+                } set: { step.wrappedValue.destinationPath = $0 }
+            }
+            TextField("Rename to", text: step.renamePattern, prompt: Text("Keep the name"))
+        case .rename:
+            TextField("New name", text: step.renamePattern, prompt: Text("YYYYMMDD_*"))
+            if !value.trimmedRename.isEmpty {
+                LabeledContent("Example") {
+                    Text("Picture1.png → \(value.newName(for: "Picture1.png", date: Date()))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        case .changeExtension:
+            TextField("New extension", text: step.newExtension, prompt: Text("md"))
+        case .trash:
+            EmptyView()
         }
     }
 

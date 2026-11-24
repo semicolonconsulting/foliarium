@@ -72,7 +72,7 @@ struct Rule: Codable, Identifiable, Hashable {
     }
 
     enum Action: String, Codable, CaseIterable, Identifiable {
-        case move, delete, changeExtension
+        case move, copy, delete, changeExtension
         case convertAliases, convertWeblocs, convertTextClippings, extractZip
         case createFolder
         case emptyTrash
@@ -82,6 +82,7 @@ struct Rule: Codable, Identifiable, Hashable {
         var title: String {
             switch self {
             case .move: return "Move files"
+            case .copy: return "Copy files"
             case .delete: return "Move to Trash"
             case .changeExtension: return "Change the extension"
             case .convertAliases: return "Convert aliases to symlinks"
@@ -96,6 +97,7 @@ struct Rule: Codable, Identifiable, Hashable {
         var symbol: String {
             switch self {
             case .move: return "folder"
+            case .copy: return "doc.on.doc"
             case .delete: return "trash"
             case .changeExtension: return "pencil"
             case .convertAliases: return "arrowshape.turn.up.right"
@@ -109,7 +111,12 @@ struct Rule: Codable, Identifiable, Hashable {
 
         /// Actions that pick files with Kind, Extensions and File name. The conversions each handle one
         /// kind of file, so they don't.
-        var usesConditions: Bool { self == .move || self == .delete || self == .changeExtension || self == .emptyTrash }
+        var usesConditions: Bool {
+            self == .move || self == .copy || self == .delete || self == .changeExtension || self == .emptyTrash
+        }
+
+        /// Actions that put a file in a folder, which can be followed by more actions ("Then").
+        var allowsFollowUps: Bool { self == .move || self == .copy }
 
         /// Actions that work on the files in the rule's folder. "Create a folder" only makes a folder there.
         /// "Delete files in Trash" goes through the items in the Trash itself, not a folder's files.
@@ -147,6 +154,9 @@ struct Rule: Codable, Identifiable, Hashable {
     var newFolderName = ""
     /// For "Delete files in Trash": only items that have been in the Trash at least this many days. 0 for any.
     var minDaysInTrash = 0
+    /// For moves and copies: what happens next, in order, to the file the action leaves behind (the moved
+    /// file, or the original after a copy).
+    var followUps: [FollowUp] = []
 
     init() {}
 
@@ -168,7 +178,11 @@ struct Rule: Codable, Identifiable, Hashable {
         newExtension = try c.decodeIfPresent(String.self, forKey: .newExtension) ?? d.newExtension
         newFolderName = try c.decodeIfPresent(String.self, forKey: .newFolderName) ?? d.newFolderName
         minDaysInTrash = try c.decodeIfPresent(Int.self, forKey: .minDaysInTrash) ?? d.minDaysInTrash
+        followUps = (try? c.decodeIfPresent([FollowUp].self, forKey: .followUps)) ?? d.followUps
     }
+
+    /// The follow-up actions this rule runs: only moves and copies have them.
+    var activeFollowUps: [FollowUp] { action.allowsFollowUps ? followUps : [] }
 
     var extensionList: [String] {
         extensions
@@ -193,10 +207,17 @@ struct Rule: Codable, Identifiable, Hashable {
         }
         if action.usesConditions && !hasCondition { return "Fill in at least one condition." }
         switch action {
-        case .move:
-            if destinationPath.isEmpty { return "Choose a folder to move files to." }
-            if !FolderAccess.canUse(destinationPath) { return "Choose the folder to move to again so Foliarium is allowed to use it." }
+        case .move, .copy:
+            let verb = action == .move ? "move" : "copy"
+            if destinationPath.isEmpty { return "Choose a folder to \(verb) files to." }
+            if !FolderAccess.canUse(destinationPath) { return "Choose the folder to \(verb) to again so Foliarium is allowed to use it." }
             if renamePattern.contains("/") || renamePattern.contains(":") { return "The new name can't contain / or :." }
+            for (index, step) in followUps.enumerated() {
+                if let problem = step.problem { return "Then, step \(index + 1): \(problem)" }
+                if step.kind == .trash && index < followUps.count - 1 {
+                    return "Then, step \(index + 1): nothing can come after Move to Trash."
+                }
+            }
         case .changeExtension:
             if cleanNewExtension.isEmpty { return "Type the new extension." }
             if cleanNewExtension.contains(where: { "/:".contains($0) }) { return "The extension can't contain / or :." }
@@ -227,7 +248,7 @@ struct Rule: Codable, Identifiable, Hashable {
     }
 
     /// Replaces YYYY, MM and DD with the date.
-    private static func fillDate(_ text: String, date: Date) -> String {
+    fileprivate static func fillDate(_ text: String, date: Date) -> String {
         let parts = Calendar.current.dateComponents([.year, .month, .day], from: date)
         return text
             .replacingOccurrences(of: "YYYY", with: String(format: "%04d", parts.year ?? 0))
@@ -240,12 +261,17 @@ struct Rule: Codable, Identifiable, Hashable {
     /// The name a moved file gets: "Picture1.png" with "YYYYMMDD_*" becomes "20261117_Picture1.png". A name
     /// that already has the pattern's shape ("20261105_Scan.png") is kept, so a file never gets two dates.
     func newName(for name: String, date: Date) -> String {
-        let pattern = trimmedRename
+        Self.rename(name, pattern: trimmedRename, date: date)
+    }
+
+    /// `name` renamed with a pattern such as "YYYYMMDD_*". An empty pattern keeps the name.
+    static func rename(_ name: String, pattern rawPattern: String, date: Date) -> String {
+        let pattern = rawPattern.trimmingCharacters(in: .whitespaces)
         guard !pattern.isEmpty else { return name }
         let ext = (name as NSString).pathExtension
         let base = ext.isEmpty ? name : (name as NSString).deletingPathExtension
-        if fnmatch(Self.glob(fromRename: pattern), base.precomposedStringWithCanonicalMapping, 0) == 0 { return name }
-        let filled = Self.fillDate(pattern, date: date).replacingOccurrences(of: "*", with: base)
+        if fnmatch(glob(fromRename: pattern), base.precomposedStringWithCanonicalMapping, 0) == 0 { return name }
+        let filled = fillDate(pattern, date: date).replacingOccurrences(of: "*", with: base)
         let newBase = filled.trimmingCharacters(in: .whitespaces)
         guard !newBase.isEmpty else { return name }
         return ext.isEmpty ? newBase : newBase + "." + ext
@@ -330,10 +356,12 @@ struct Rule: Codable, Identifiable, Hashable {
     /// For the What column: "Move .pdf → Docs" (inside the rule's folder) or "→ ~/Documents/PDFs", or the conversion.
     var actionSummary: String {
         switch action {
-        case .move:
+        case .move, .copy:
             let destination = destinationPath.isEmpty ? "no folder chosen" : Paths.relative(destinationPath, to: folderPath)
             let rename = trimmedRename.isEmpty ? "" : " as \(trimmedRename)"
-            return "Move \(conditionSummary) → \(destination)\(rename)"
+            let verb = action == .move ? "Move" : "Copy"
+            let then = followUps.map { ", then " + $0.summary(from: folderPath) }.joined()
+            return "\(verb) \(conditionSummary) → \(destination)\(rename)\(then)"
         case .delete:
             return "Move \(conditionSummary) to the Trash"
         case .emptyTrash:
@@ -346,6 +374,105 @@ struct Rule: Codable, Identifiable, Hashable {
             return "Create folder “\(name.isEmpty ? "?" : name)”"
         default:
             return action.title
+        }
+    }
+}
+
+/// An action that runs after a rule's move or copy, on the file that's left: the moved file, or the original
+/// after a copy. Several run in order, so "Copy to Backup, then move to Archive" or "Move to Scans, then rename".
+struct FollowUp: Codable, Identifiable, Hashable {
+    enum Kind: String, Codable, CaseIterable, Identifiable {
+        case copy, move, rename, changeExtension, trash
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .copy: return "Copy to a folder"
+            case .move: return "Move to a folder"
+            case .rename: return "Rename"
+            case .changeExtension: return "Change the extension"
+            case .trash: return "Move to Trash"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .copy: return "doc.on.doc"
+            case .move: return "folder"
+            case .rename: return "character.cursor.ibeam"
+            case .changeExtension: return "pencil"
+            case .trash: return "trash"
+            }
+        }
+
+        var usesFolder: Bool { self == .copy || self == .move }
+    }
+
+    var id = UUID()
+    var kind: Kind = .copy
+    /// For copy and move: the folder.
+    var destinationPath = ""
+    /// For copy, move and rename: the new name, as in Rule.renamePattern. Empty keeps the name (not for rename).
+    var renamePattern = ""
+    /// For "Change the extension".
+    var newExtension = ""
+
+    init(kind: Kind = .copy) { self.kind = kind }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = FollowUp()
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? d.id
+        kind = (try? c.decodeIfPresent(Kind.self, forKey: .kind)) ?? d.kind
+        destinationPath = try c.decodeIfPresent(String.self, forKey: .destinationPath) ?? d.destinationPath
+        renamePattern = try c.decodeIfPresent(String.self, forKey: .renamePattern) ?? d.renamePattern
+        newExtension = try c.decodeIfPresent(String.self, forKey: .newExtension) ?? d.newExtension
+    }
+
+    var trimmedRename: String { renamePattern.trimmingCharacters(in: .whitespaces) }
+
+    /// The new extension without spaces or leading dots: " .md" → "md".
+    var cleanNewExtension: String {
+        String(newExtension.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "." }))
+    }
+
+    var problem: String? {
+        switch kind {
+        case .copy, .move:
+            if destinationPath.isEmpty { return "Choose a folder to \(kind == .copy ? "copy" : "move") to." }
+            if !FolderAccess.canUse(destinationPath) { return "Choose its folder again so Foliarium is allowed to use it." }
+        case .rename:
+            if trimmedRename.isEmpty { return "Type the new name." }
+        case .changeExtension:
+            if cleanNewExtension.isEmpty { return "Type the new extension." }
+            if cleanNewExtension.contains(where: { "/:".contains($0) }) { return "The extension can't contain / or :." }
+        case .trash:
+            break
+        }
+        if kind != .changeExtension, renamePattern.contains("/") || renamePattern.contains(":") {
+            return "The new name can't contain / or :."
+        }
+        return nil
+    }
+
+    func newName(for name: String, date: Date) -> String {
+        Rule.rename(name, pattern: kind == .trash || kind == .changeExtension ? "" : renamePattern, date: date)
+    }
+
+    /// For the What column: "copy → Backup", "rename as YYYYMMDD_*", "move to the Trash".
+    func summary(from folder: String) -> String {
+        let rename = trimmedRename.isEmpty ? "" : " as \(trimmedRename)"
+        switch kind {
+        case .copy, .move:
+            let destination = destinationPath.isEmpty ? "no folder chosen" : Paths.relative(destinationPath, to: folder)
+            return "\(kind == .copy ? "copy" : "move") → \(destination)\(rename)"
+        case .rename:
+            return "rename\(rename.isEmpty ? "" : rename)"
+        case .changeExtension:
+            return "change to .\(cleanNewExtension.isEmpty ? "?" : cleanNewExtension)"
+        case .trash:
+            return "move to the Trash"
         }
     }
 }

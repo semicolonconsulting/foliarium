@@ -29,6 +29,8 @@ xcrun notarytool store-credentials notary --apple-id <your Apple ID> --team-id C
 
 Set `NOTARY_PROFILE` to use another profile. If Apple rejects the app, the script prints the notary log.
 
+The disk image opens on a window that asks you to drag Foliarium into Applications. `scripts/make-dmg.sh <app> <dmg>` makes it on its own, without signing, handy for trying a new design: it installs [dmgbuild](https://github.com/dmgbuild/dmgbuild) into `build/.dmgbuild-venv` the first time and lays out the window from `scripts/dmg-settings.py`. The window background is `Design/dmg/background.png` and its `@2x`, drawn by `Design/dmg/make-background.py` (it needs Pillow and the Inter font); keep the icon positions in the two files in step.
+
 ### Updates
 
 The DMG edition updates itself from this repository's GitHub releases. Once a day, and when you click Check Now in the General tab or Check for Updates… in the menu, it asks GitHub for the latest release. If that release is newer than the running copy and has a `.dmg` attached, it offers to install it. Installing downloads the DMG, copies the app out of it, checks that the copy is signed by the Developer ID team `C6ZRF9KM22` and notarized, puts it in place of the running copy and opens it again.
