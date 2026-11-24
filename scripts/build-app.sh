@@ -20,7 +20,8 @@ fi
 echo "Signing with: $SIGN_IDENTITY"
 EXTRA=()
 if [[ "${EDITION:-}" == "appstore" ]]; then
-    EXTRA=(ENABLE_APP_SANDBOX=YES CODE_SIGN_ENTITLEMENTS=Config/Foliarium-AppStore.entitlements)
+    EXTRA=(ENABLE_APP_SANDBOX=YES CODE_SIGN_ENTITLEMENTS=Config/Foliarium-AppStore.entitlements
+           "SWIFT_ACTIVE_COMPILATION_CONDITIONS=\$(inherited) APPSTORE")
     echo "Edition: App Store (sandboxed)"
 fi
 DERIVED="build/DerivedData"
