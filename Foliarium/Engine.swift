@@ -2,13 +2,15 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum ActionKind: String {
-    case webloc, alias, move, delete, extensionChange, clipping, zip, folder, purge
+    case webloc, alias, move, copy, rename, delete, extensionChange, clipping, zip, folder, purge
 
     var title: String {
         switch self {
         case .webloc: return "Webloc → URL"
         case .alias: return "Alias → Symlink"
         case .move: return "Move"
+        case .copy: return "Copy"
+        case .rename: return "Rename"
         case .delete: return "Delete"
         case .extensionChange: return "New extension"
         case .clipping: return "Clipping → Text"
@@ -23,6 +25,8 @@ enum ActionKind: String {
         case .webloc: return "link"
         case .alias: return "arrowshape.turn.up.right"
         case .move: return "folder"
+        case .copy: return "doc.on.doc"
+        case .rename: return "character.cursor.ibeam"
         case .delete: return "trash"
         case .extensionChange: return "pencil"
         case .clipping: return "doc.plaintext"
@@ -75,14 +79,18 @@ struct RunReport {
         var parts: [String] = []
         let done = records.filter { $0.status == .done }
         let moved = done.filter { $0.kind == .move }.count
+        let copied = done.filter { $0.kind == .copy }.count
+        let renamed = done.filter { $0.kind == .rename }.count
         let deleted = done.filter { $0.kind == .delete }.count
         let created = done.filter { $0.kind == .folder }.count
         let purged = done.filter { $0.kind == .purge }.count
-        let converted = done.count - moved - deleted - created - purged
+        let converted = done.count - moved - copied - renamed - deleted - created - purged
         let planned = records.filter { $0.status == .planned }.count
         let failed = records.filter(\.failed).count
         if converted > 0 { parts.append("\(converted) converted") }
         if moved > 0 { parts.append("\(moved) moved") }
+        if copied > 0 { parts.append("\(copied) copied") }
+        if renamed > 0 { parts.append("\(renamed) renamed") }
         if deleted > 0 { parts.append("\(deleted) deleted") }
         if purged > 0 { parts.append("\(purged) deleted from the Trash") }
         if created > 0 { parts.append(created == 1 ? "1 folder created" : "\(created) folders created") }
@@ -94,8 +102,9 @@ struct RunReport {
 }
 
 /// Does the work for one run: finds the files in the rules' folders, then takes each file through three steps:
-/// a conversion for its type (.webloc, alias, .textClipping, .zip), a change of extension, then the first move
-/// or delete rule that matches. So a converted file can be renamed and moved in the same run. A file is handled by the rules whose folder it's in (directly, or in a subfolder when the rule
+/// a conversion for its type (.webloc, alias, .textClipping, .zip), a change of extension, then the first move,
+/// copy or delete rule that matches, followed by that rule's own follow-up actions ("Then"). So a converted file
+/// can be renamed and moved in the same run. A file is handled by the rules whose folder it's in (directly, or in a subfolder when the rule
 /// includes subfolders), in the order of the rules list.
 /// Not thread-safe: make one per run, on the processor's queue.
 final class Engine {
@@ -111,11 +120,28 @@ final class Engine {
     private struct Resolved {
         let rule: Rule
         let folder: String
-        /// Where a move rule moves files to.
+        /// What a move, copy or delete rule does to a matching file, in order: its own action, then its
+        /// follow-ups.
+        let steps: [Step]
+        /// The rule's move and copy destinations that are inside its own folder. Files anywhere inside them are
+        /// never moved or copied again, so subfolders the user organises inside a destination stay as they are,
+        /// and a copy isn't copied again.
+        let protected: [String]
+    }
+
+    /// One action on one file, with its folder resolved.
+    private struct Step {
+        let kind: FollowUp.Kind
+        /// For copy and move.
         let destination: String?
-        /// A move rule's destination when it's inside the rule's own folder. Files anywhere inside it are never
-        /// moved again, so subfolders the user organises inside a destination stay as they are.
-        let protected: String?
+        let renamePattern: String
+        let newExtension: String
+    }
+
+    /// The real path of a destination folder, or the tidied-up path when it doesn't exist (yet).
+    private static func resolveFolder(_ path: String) -> String {
+        let expanded = Paths.expand(path)
+        return Paths.canonical(expanded) ?? (expanded as NSString).standardizingPath
     }
 
     let dryRun: Bool
@@ -153,15 +179,24 @@ final class Engine {
                 if !missing.contains(message) { missing.append(message) }
                 continue
             }
-            var destination: String?
-            var protected: String?
-            if rule.action == .move {
-                let expanded = Paths.expand(rule.destinationPath)
-                let resolvedDestination = Paths.canonical(expanded) ?? (expanded as NSString).standardizingPath
-                destination = resolvedDestination
-                if resolvedDestination != folder, Paths.isInside(resolvedDestination, folder) { protected = resolvedDestination }
+            var steps: [Step] = []
+            switch rule.action {
+            case .move, .copy:
+                steps.append(Step(kind: rule.action == .move ? .move : .copy, destination: Self.resolveFolder(rule.destinationPath),
+                                  renamePattern: rule.renamePattern, newExtension: ""))
+                for followUp in rule.activeFollowUps {
+                    steps.append(Step(kind: followUp.kind,
+                                      destination: followUp.kind.usesFolder ? Self.resolveFolder(followUp.destinationPath) : nil,
+                                      renamePattern: followUp.kind == .changeExtension ? "" : followUp.renamePattern,
+                                      newExtension: followUp.cleanNewExtension))
+                }
+            case .delete:
+                steps.append(Step(kind: .trash, destination: nil, renamePattern: "", newExtension: ""))
+            default:
+                break
             }
-            let item = Resolved(rule: rule, folder: folder, destination: destination, protected: protected)
+            let protected = steps.compactMap(\.destination).filter { $0 != folder && Paths.isInside($0, folder) }
+            let item = Resolved(rule: rule, folder: folder, steps: steps, protected: protected)
             if rule.action.handlesFiles {
                 resolved.append(item)
             } else if rule.action == .emptyTrash {
@@ -336,9 +371,9 @@ final class Engine {
             current = made
         }
 
-        // 3. Move or delete: the first rule that matches decides.
-        moveOrDelete(current, rules: rules.filter { $0.rule.action == .move || $0.rule.action == .delete },
-                     fallbackType: current == path ? fallbackType : nil)
+        // 3. Move, copy or delete: the first rule that matches decides, then its follow-ups run.
+        moveCopyOrDelete(current, rules: rules.filter { [.move, .copy, .delete].contains($0.rule.action) },
+                         fallbackType: current == path ? fallbackType : nil)
     }
 
     private func fileType(_ name: String, _ fallback: UTType?) -> UTType? {
@@ -597,9 +632,9 @@ final class Engine {
         return path
     }
 
-    // MARK: Move and delete rules
+    // MARK: Move, copy and delete rules
 
-    private func moveOrDelete(_ path: String, rules: [Resolved], fallbackType: UTType?) {
+    private func moveCopyOrDelete(_ path: String, rules: [Resolved], fallbackType: UTType?) {
         guard !rules.isEmpty else { return }
         let name = (path as NSString).lastPathComponent
         let parent = (path as NSString).deletingLastPathComponent
@@ -607,43 +642,152 @@ final class Engine {
         // never get a look. That keeps two rules from passing a file back and forth.
         guard let match = rules.first(where: { $0.rule.matches(name: name, type: fileType(name, fallbackType)) }) else { return }
 
-        if match.rule.action == .delete {
-            if dryRun {
-                vacated.insert(path)
-                record(.delete, path, nil, .planned)
-                return
-            }
-            do {
-                try trash(URL(fileURLWithPath: path))
-                record(.delete, path, nil, .done)
-            } catch {
-                record(.delete, path, nil, .failed("Couldn't move it to the Trash: \(error.localizedDescription)"))
-            }
+        // Files already inside a move or copy rule's destination (within that rule's folder) stay where they
+        // are. A delete rule still deletes them.
+        if match.rule.action != .delete,
+           rules.contains(where: { $0.protected.contains { Paths.isInside(parent, $0) } }) { return }
+
+        var current = path
+        for step in match.steps {
+            guard let next = perform(step, on: current) else { return }
+            current = next
+        }
+    }
+
+    /// Does one action to the file at `path`. Returns where the file now is, for the next action, or nil when
+    /// there's nothing left to do (it's in the Trash, or the action failed).
+    private func perform(_ step: Step, on path: String) -> String? {
+        switch step.kind {
+        case .trash: trashFile(path); return nil
+        case .move: return move(path, step)
+        case .copy: return copy(path, step)
+        case .rename: return rename(path, pattern: step.renamePattern)
+        case .changeExtension: return changeExtension(path, to: step.newExtension)
+        }
+    }
+
+    private func trashFile(_ path: String) {
+        if dryRun {
+            vacated.insert(path)
+            record(.delete, path, nil, .planned)
             return
         }
+        do {
+            try trash(URL(fileURLWithPath: path))
+            record(.delete, path, nil, .done)
+        } catch {
+            record(.delete, path, nil, .failed("Couldn't move it to the Trash: \(error.localizedDescription)"))
+        }
+    }
 
-        // Files already inside a move rule's destination (within that rule's folder) stay where they are.
-        if rules.contains(where: { $0.protected.map { Paths.isInside(parent, $0) } ?? false }) { return }
-        guard let destination = match.destination else { return }
-        if parent == destination { return }
-
+    /// Whether `destination` is an existing folder. Records a failure when it isn't.
+    private func checkFolder(_ destination: String, _ kind: ActionKind, _ path: String) -> Bool {
         var isFolder: ObjCBool = false
-        guard fm.fileExists(atPath: destination, isDirectory: &isFolder), isFolder.boolValue else {
-            record(.move, path, destination, .failed("The folder to move to can't be found: \(Paths.display(destination))"))
-            return
-        }
-        let target = uniquePath(in: destination, name: match.rule.newName(for: name, date: Date()))
+        if fm.fileExists(atPath: destination, isDirectory: &isFolder), isFolder.boolValue { return true }
+        let verb = kind == .copy ? "copy" : "move"
+        record(kind, path, destination, .failed("The folder to \(verb) to can't be found: \(Paths.display(destination))"))
+        return false
+    }
+
+    private func move(_ path: String, _ step: Step) -> String? {
+        guard let destination = step.destination else { return nil }
+        let name = (path as NSString).lastPathComponent
+        // Already there: nothing to move, but the next actions still run.
+        if (path as NSString).deletingLastPathComponent == destination { return path }
+        guard checkFolder(destination, .move, path) else { return nil }
+        let target = uniquePath(in: destination, name: Rule.rename(name, pattern: step.renamePattern, date: Date()))
         if dryRun {
             reserved.insert(target)
             vacated.insert(path)
             record(.move, path, target, .planned)
-            return
+            return target
         }
         do {
             try fm.moveItem(atPath: path, toPath: target)
             record(.move, path, target, .done)
+            return target
         } catch {
             record(.move, path, target, .failed(error.localizedDescription))
+            return nil
+        }
+    }
+
+    /// The extended attribute on an original file listing the folders it has been copied to, so it's copied to
+    /// each folder once, even after it's renamed or moved, or after Run Now goes through the folder again.
+    static let copiedToAttribute = "com.semicolonc.foliarium.copied-to"
+
+    private func copiedFolders(_ path: String) -> [String] {
+        let size = getxattr(path, Self.copiedToAttribute, nil, 0, 0, XATTR_NOFOLLOW)
+        guard size > 0 else { return [] }
+        var data = Data(count: size)
+        let read = data.withUnsafeMutableBytes { getxattr(path, Self.copiedToAttribute, $0.baseAddress, size, 0, XATTR_NOFOLLOW) }
+        guard read > 0, let text = String(data: data.prefix(read), encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").map(String.init)
+    }
+
+    private func setCopiedFolders(_ folders: [String], on path: String) {
+        let data = Data(folders.joined(separator: "\n").utf8)
+        _ = data.withUnsafeBytes { setxattr(path, Self.copiedToAttribute, $0.baseAddress, data.count, 0, XATTR_NOFOLLOW) }
+    }
+
+    /// Copies the file into the step's folder, never overwriting anything, and returns the original's path: the
+    /// next actions work on the original. A file that was copied to that folder before isn't copied again.
+    private func copy(_ path: String, _ step: Step) -> String? {
+        guard let destination = step.destination else { return nil }
+        let name = (path as NSString).lastPathComponent
+        // A copy next to the original would be copied again and again.
+        if (path as NSString).deletingLastPathComponent == destination { return path }
+        if copiedFolders(path).contains(destination) { return path }
+        guard checkFolder(destination, .copy, path) else { return nil }
+        let newName = Rule.rename(name, pattern: step.renamePattern, date: Date())
+        // Also counts as copied: the same name and size already there (when the attribute couldn't be saved).
+        let existing = (destination as NSString).appendingPathComponent(newName)
+        if let a = try? fm.attributesOfItem(atPath: path), let b = try? fm.attributesOfItem(atPath: existing),
+           (a[.size] as? Int) == (b[.size] as? Int), (a[.type] as? FileAttributeType) == .typeRegular {
+            return path
+        }
+        let target = uniquePath(in: destination, name: newName)
+        if dryRun {
+            reserved.insert(target)
+            record(.copy, path, target, .planned)
+            return path
+        }
+        do {
+            try fm.copyItem(atPath: path, toPath: target)
+        } catch {
+            record(.copy, path, target, .failed(error.localizedDescription))
+            return nil
+        }
+        // The copy is a file of its own: it doesn't carry the original's list.
+        removexattr(target, Self.copiedToAttribute, XATTR_NOFOLLOW)
+        setCopiedFolders(copiedFolders(path) + [destination], on: path)
+        record(.copy, path, target, .done)
+        return path
+    }
+
+    /// Renames the file in its own folder with a pattern such as "YYYYMMDD_*". Returns the new path.
+    private func rename(_ path: String, pattern: String) -> String? {
+        let name = (path as NSString).lastPathComponent
+        let newName = Rule.rename(name, pattern: pattern, date: Date())
+        if newName == name { return path }
+        let folder = (path as NSString).deletingLastPathComponent
+        // Only the case differs: the same file on a case-insensitive disk, so rename it in place.
+        let target = newName.lowercased() == name.lowercased()
+            ? (folder as NSString).appendingPathComponent(newName)
+            : uniquePath(in: folder, name: newName)
+        if dryRun {
+            reserved.insert(target)
+            vacated.insert(path)
+            record(.rename, path, target, .planned)
+            return target
+        }
+        do {
+            try fm.moveItem(atPath: path, toPath: target)
+            record(.rename, path, target, .done)
+            return target
+        } catch {
+            record(.rename, path, target, .failed(error.localizedDescription))
+            return nil
         }
     }
 
