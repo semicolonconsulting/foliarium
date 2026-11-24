@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Draws the DMG window background: background.png (640x420) and background@2x.png.
 
-Colors come from the Foliarium product page (semicolon.consulting/foliarium): navy #262b63 text,
-brand blue #0B4AA2 to teal #0D9488 for the app name, and the soft blue / lavender / peach wash.
+Colors follow the Foliarium card on semicolon.consulting: the sky blue / mint / periwinkle wash,
+#414141 text, #666666 tagline and teal #0D9488 for the app name and the arrow.
 The app icon and the Applications folder are drawn by Finder on top, at the positions set in
 scripts/dmg-settings.py, so keep the two in step.
 
@@ -22,9 +22,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BOLD = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/opentype/inter/Inter-Bold.otf"
 MEDIUM = sys.argv[2] if len(sys.argv) > 2 else "/usr/share/fonts/opentype/inter/Inter-Medium.otf"
 
-NAVY = (38, 43, 99)
-MUTED = (97, 97, 120)
-BLUE = (11, 74, 162)
+INK = (65, 65, 65)
+MUTED = (102, 102, 102)
+BLUE = (24, 132, 214)
 SKY = (63, 178, 236)
 TEAL = (13, 148, 136)
 
@@ -45,21 +45,20 @@ def hgradient(size, stops):
 
 
 def background():
-    w, h = W * S, H * S
-    img = Image.new("RGB", (w, h), (250, 250, 253))
-    wash = Image.new("RGB", (w, h), (250, 250, 253))
-    d = ImageDraw.Draw(wash)
-    # Soft colour blobs, blurred into a wash (product page: #7fb7d9, #b9a6d9, #f2c4a8, teal).
-    for (cx, cy, r, color) in [
-        (60, 40, 210, (196, 220, 240)),    # sky blue, top left
-        (600, 30, 200, (246, 222, 210)),   # peach, top right
-        (430, 0, 150, (228, 220, 244)),    # lavender, top
-        (620, 380, 190, (206, 236, 230)),  # mint/teal, bottom right
-        (40, 390, 160, (224, 226, 246)),   # lavender, bottom left
-    ]:
-        d.ellipse([(cx - r) * S, (cy - r) * S, (cx + r) * S, (cy + r) * S], fill=color)
-    wash = wash.filter(ImageFilter.GaussianBlur(90 * S))
-    img = Image.blend(img, wash, 0.9)
+    """The product card's wash: sky blue top left, mint top right, periwinkle bottom right."""
+    corners = {  # (x, y) in 0..1 -> rgb, sampled from the Foliarium card on semicolon.consulting
+        (0, 0): (201, 228, 252), (1, 0): (207, 239, 237),
+        (0, 1): (230, 244, 250), (1, 1): (214, 226, 250),
+    }
+    small = Image.new("RGB", (2, 2))
+    for (x, y), c in corners.items():
+        small.putpixel((x, y), c)
+    img = small.resize((W * S, H * S), Image.BILINEAR)
+    # A soft, lighter glow across the middle, like the card's centre.
+    glow = Image.new("L", img.size, 0)
+    ImageDraw.Draw(glow).ellipse([120 * S, 40 * S, 520 * S, 330 * S], fill=120)
+    glow = glow.filter(ImageFilter.GaussianBlur(70 * S))
+    img.paste((236, 246, 251), (0, 0), glow)
     return img
 
 
@@ -97,11 +96,11 @@ def draw_arrow(img):
         d.ellipse([cx - t / 2, cy - t / 2, cx + t / 2, cy + t / 2], fill=255)
     d.ellipse([x1 - t / 2, y - t / 2, x1 + t / 2, y + t / 2], fill=255)
     grad = Image.new("RGB", (w, h))
-    grad.paste(hgradient((x1 - x0 + t, h), [(0, SKY), (0.55, BLUE), (1, TEAL)]), (int(x0 - t / 2), 0))
+    grad.paste(hgradient((x1 - x0 + t, h), [(0, SKY), (0.5, BLUE), (1, TEAL)]), (int(x0 - t / 2), 0))
     # A faint shadow under the arrow.
     shadow = mask.filter(ImageFilter.GaussianBlur(4 * S)).point(lambda v: v * 0.18)
     shadow = ImageChops.offset(shadow, 0, 3 * S)
-    img.paste((11, 40, 110), (0, 0), shadow)
+    img.paste((10, 90, 110), (0, 0), shadow)
     img.paste(grad, (0, 0), mask)
 
 
@@ -109,8 +108,8 @@ def main():
     img = background()
     headline = ImageFont.truetype(BOLD, 27 * S)
     tagline = ImageFont.truetype(MEDIUM, 14 * S)
-    draw_text(img, 56 * S, [("Drag ", NAVY), ("Foliarium", [(0, SKY), (0.45, BLUE), (1, TEAL)]),
-                            (" into Applications", NAVY)], headline)
+    draw_text(img, 56 * S, [("Drag ", INK), ("Foliarium", [(0, BLUE), (1, TEAL)]),
+                            (" into Applications", INK)], headline)
     draw_text(img, 98 * S, [("Tidies your Mac’s folders by itself", MUTED)], tagline)
     draw_arrow(img)
     img.save(os.path.join(HERE, "background@2x.png"), optimize=True)
