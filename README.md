@@ -37,7 +37,7 @@ Foliarium tidies your Mac's folders by itself. You write a few rules, like "PDFs
 
 ### Install
 
-Download the latest release from [Releases](https://github.com/semicolonconsulting/foliarium/releases/latest), open it and drag Foliarium onto Applications. It needs macOS 14 Sonoma or later. Foliarium lives in the menu bar, and the first time it opens, its Settings window opens so you can add a rule. From version 1.1 it keeps itself up to date: when a new release is out, it offers to install it.
+Download the latest release from [Releases](https://github.com/semicolonconsulting/foliarium/releases/latest), open it and drag Foliarium onto Applications. It needs macOS 14 Sonoma or later. Foliarium lives in the menu bar, and the first time it opens, its Settings window opens so you can add a rule. From version 1.0.1 it keeps itself up to date: when a new release is out, it offers to install it.
 
 ### Contributing
 
