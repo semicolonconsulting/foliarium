@@ -72,3 +72,4 @@ spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG
 spctl --assess --type execute --verbose=2 "$APP"
 shasum -a 256 "$DMG"
 echo "Built $DMG"
+echo "To ship it as an update, publish a GitHub release tagged v$VERSION with $DMG attached."

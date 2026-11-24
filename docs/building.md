@@ -31,6 +31,18 @@ Set `NOTARY_PROFILE` to use another profile. If Apple rejects the app, the scrip
 
 The disk image opens on a window that asks you to drag Foliarium into Applications. `scripts/make-dmg.sh <app> <dmg>` makes it on its own, without signing, handy for trying a new design: it installs [dmgbuild](https://github.com/dmgbuild/dmgbuild) into `build/.dmgbuild-venv` the first time and lays out the window from `scripts/dmg-settings.py`. The window background is `Design/dmg/background.png` and its `@2x`, drawn by `Design/dmg/make-background.py` (it needs Pillow and the Inter font); keep the icon positions in the two files in step.
 
+### Updates
+
+The DMG edition updates itself from this repository's GitHub releases. Once a day, and when you click Check Now in the General tab or Check for Updates… in the menu, it asks GitHub for the latest release. If that release is newer than the running copy and has a `.dmg` attached, it offers to install it. Installing downloads the DMG, copies the app out of it, checks that the copy is signed by the Developer ID team `C6ZRF9KM22` and notarized, puts it in place of the running copy and opens it again.
+
+So to ship an update:
+
+1. Raise `MARKETING_VERSION` in the Xcode project (and `CURRENT_PROJECT_VERSION`).
+2. Run `./scripts/release.sh`.
+3. Publish a GitHub release tagged `v<version>` (for example `v1.1`) with `build/Foliarium-<version>.dmg` attached. Drafts and pre-releases are ignored.
+
+The App Store edition leaves the updater out entirely: `appstore.sh` and `EDITION=appstore` build with the `APPSTORE` compilation condition.
+
 ## App Store edition
 
 The App Store edition is the same code, built in the App Sandbox. There it can only use folders you choose in the rule editor, which it remembers with security-scoped bookmarks, and it has no "Delete files in Trash" action, because a sandboxed app can't read the Trash. A rule whose folder it isn't allowed to use shows "Needs access" until you choose the folder again.
@@ -71,6 +83,7 @@ open -n build/Foliarium.app --args -configPath /tmp/ft/config.json -openSettings
 | `Foliarium/RulesView.swift` | The Rules tab and the rule editor |
 | `Foliarium/ActivityView.swift` | The Activity tab and the Preview list |
 | `Foliarium/LoginItem.swift` | Open at Login |
+| `Foliarium/Updater.swift` | Updates for the DMG edition, from GitHub releases, and the General tab's Updates section |
 | `Config/Info.plist` | The app's Info.plist |
 | `Foliarium/FolderAccess.swift` | The App Store edition's sandbox: which folders it may use, and the edition's limits |
 | `Config/Foliarium-AppStore.entitlements` | The App Store edition's sandbox entitlements |

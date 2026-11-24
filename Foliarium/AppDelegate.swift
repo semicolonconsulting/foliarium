@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &subscriptions)
 
         model.start()
+        #if !APPSTORE
+        Updater.shared.start()
+        #endif
         // Nothing happens until there's a rule, so a first launch opens the Rules tab.
         if model.config.rules.isEmpty { Windows.settings.show(.rules) }
         openWindowsFromArguments()
@@ -114,6 +117,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         add(menu, "Activity…", #selector(showActivity))
         add(menu, "Settings…", #selector(showSettings), key: ",")
+        #if !APPSTORE
+        if Updater.isAvailable {
+            if case .available(let release) = Updater.shared.state {
+                add(menu, "Update to Foliarium \(release.version)…", #selector(installUpdate))
+            } else {
+                add(menu, "Check for Updates…", #selector(checkForUpdates), enabled: !Updater.shared.isBusy)
+            }
+        }
+        #endif
         menu.addItem(.separator())
         add(menu, "Quit Foliarium", #selector(NSApplication.terminate(_:)), key: "q", target: NSApp)
     }
@@ -140,6 +152,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func showActivity() { Windows.settings.show(.activity) }
     @objc private func showSettings() { Windows.settings.show() }
+    #if !APPSTORE
+    @objc private func checkForUpdates() { Updater.shared.check(userInitiated: true, showResult: true) }
+    @objc private func installUpdate() {
+        if case .available(let release) = Updater.shared.state { Updater.shared.install(release) }
+    }
+    #endif
 
     // MARK: Main menu
 

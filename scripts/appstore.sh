@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the App Store edition: sandboxed, without "Delete files in Trash", signed for the Mac App Store.
+# Builds the App Store edition: sandboxed, without "Delete files in Trash" or the updater, signed for the Mac App Store.
 # Makes build/appstore/Foliarium.pkg, or uploads it to App Store Connect with UPLOAD=1.
 #
 # Needs the app record for com.semicolonc.foliarium in App Store Connect, and Xcode signed in to the team's
@@ -30,6 +30,7 @@ if ! xcodebuild archive \
     DEVELOPMENT_TEAM="$TEAM_ID" \
     ENABLE_APP_SANDBOX=YES \
     CODE_SIGN_ENTITLEMENTS=Config/Foliarium-AppStore.entitlements \
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) APPSTORE' \
     ${EXTRA[@]+"${EXTRA[@]}"} \
     > "$LOG" 2>&1; then
     grep -E "error|failed|Failed" "$LOG" | tail -40 >&2

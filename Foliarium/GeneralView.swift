@@ -80,6 +80,9 @@ struct GeneralView: View {
                 Text("Run")
             }
 
+            #if !APPSTORE
+            if Updater.isAvailable { UpdatesSection(updater: .shared) }
+            #endif
         }
         .formStyle(.grouped)
         .onAppear { openAtLogin = LoginItem.isEnabled }
