@@ -198,10 +198,11 @@ struct ResultText: View {
         if record.kind == .purge { return "Deleted for good" }
         guard let destination = record.destination else { return "" }
         switch record.kind {
-        case .webloc, .extensionChange, .clipping, .zip, .delete, .folder, .purge: return "→ " + (destination as NSString).lastPathComponent
+        case .webloc, .extensionChange, .rename, .clipping, .zip, .delete, .folder, .purge: return "→ " + (destination as NSString).lastPathComponent
         case .alias: return "→ symlink to " + Paths.display(destination)
         // Shown from the file's own folder: "→ Docs/report.pdf", or the full path when it went elsewhere.
         case .move: return "→ " + Paths.relative(destination, to: (record.source as NSString).deletingLastPathComponent)
+        case .copy: return "Copied to " + Paths.relative(destination, to: (record.source as NSString).deletingLastPathComponent)
         }
     }
 }
