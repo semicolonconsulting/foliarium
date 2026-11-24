@@ -29,6 +29,8 @@ xcrun notarytool store-credentials notary --apple-id <your Apple ID> --team-id C
 
 Set `NOTARY_PROFILE` to use another profile. If Apple rejects the app, the script prints the notary log.
 
+The disk image opens on a window that asks you to drag Foliarium into Applications. `scripts/make-dmg.sh <app> <dmg>` makes it on its own, without signing, handy for trying a new design: it installs [dmgbuild](https://github.com/dmgbuild/dmgbuild) into `build/.dmgbuild-venv` the first time and lays out the window from `scripts/dmg-settings.py`. The window background is `Design/dmg/background.png` and its `@2x`, drawn by `Design/dmg/make-background.py` (it needs Pillow and the Inter font); keep the icon positions in the two files in step.
+
 ## App Store edition
 
 The App Store edition is the same code, built in the App Sandbox. There it can only use folders you choose in the rule editor, which it remembers with security-scoped bookmarks, and it has no "Delete files in Trash" action, because a sandboxed app can't read the Trash. A rule whose folder it isn't allowed to use shows "Needs access" until you choose the folder again.

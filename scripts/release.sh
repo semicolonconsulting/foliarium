@@ -60,15 +60,9 @@ notarize "$ZIP"
 rm -f "$ZIP"
 xcrun stapler staple "$APP"
 
-# The disk image: the app and a link to Applications to drag it onto.
+# The disk image: the app and a link to Applications to drag it onto, in the designed window.
 DMG="build/Foliarium-$VERSION.dmg"
-STAGE="build/dmg"
-rm -rf "$STAGE" "$DMG"
-mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Foliarium.app"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "Foliarium" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" > /dev/null
-rm -rf "$STAGE"
+./scripts/make-dmg.sh "$APP" "$DMG"
 codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
 notarize "$DMG"
 xcrun stapler staple "$DMG"
